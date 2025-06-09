@@ -1,0 +1,892 @@
+<style>
+  /* Variables CSS */
+  :root {
+    /* Colores principales */
+    --color-primary: #D95B43;       /* Terracota ASISPLUS */
+    --color-primary-rgb: 217, 91, 67; /* Para rgba */
+    --color-secondary: #3A7CA5;     /* Azul médico */
+    --color-secondary-rgb: 58, 124, 165; /* Para rgba */
+    --color-text: #333333;          /* Texto principal */
+    --color-text-light: #767676;    /* Texto secundario */
+    --color-background: #F4F7F9;    /* Fondo general */
+    --color-white: #FFFFFF;         /* Blanco */
+    
+    /* Colores de estado */
+    --color-success: #28A745;       /* Verde éxito */
+    --color-success-rgb: 40, 167, 69;
+    --color-warning: #FFC107;       /* Amarillo advertencia */
+    --color-warning-rgb: 255, 193, 7;
+    --color-error: #DC3545;         /* Rojo error */
+    --color-error-rgb: 220, 53, 69;
+    --color-info: #17A2B8;          /* Azul información */
+    --color-info-rgb: 23, 162, 184;
+    
+    /* Espaciados */
+    --spacing-xs: 0.25rem;  /* 4px */
+    --spacing-sm: 0.5rem;   /* 8px */
+    --spacing-md: 1rem;     /* 16px */
+    --spacing-lg: 1.5rem;   /* 24px */
+    --spacing-xl: 2rem;     /* 32px */
+    
+    /* Radios de Borde */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    
+    /* Sombras */
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+
+    /* Colores para Autofill */
+    --color-autofill-background: #e8f0fe; 
+    --color-autofill-text: var(--color-text);
+    --color-autofill-border: var(--color-secondary);
+  }
+  
+  /* Estilos base y Reseteo Simple */
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  
+  body {
+    font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-size: 16px;
+    line-height: 1.6; 
+    color: var(--color-text);
+    background-color: var(--color-background);
+    padding: var(--spacing-md);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  .container {
+    max-width: 800px;
+    margin: var(--spacing-md) auto; 
+    background-color: var(--color-white);
+    border-radius: var(--radius-lg); 
+    box-shadow: var(--shadow-lg);
+    padding: var(--spacing-lg) var(--spacing-xl); 
+  }
+  
+  /* Encabezado del Formulario */
+  .form-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: var(--spacing-xl);
+    text-align: center;
+  }
+  
+  .form-header img.logo {
+    max-width: 180px;
+    margin-bottom: var(--spacing-md);
+  }
+  
+  .form-header h1 {
+    color: var(--color-primary);
+    font-size: 2rem; 
+    font-weight: 600;
+    margin-bottom: var(--spacing-sm);
+  }
+  
+  /* Barra de Progreso */
+  .progress-container {
+    margin-bottom: var(--spacing-xl);
+  }
+  
+  .progress-bar {
+    height: 10px; 
+    background-color: #e9ecef;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin-bottom: var(--spacing-sm);
+  }
+  
+  .progress-indicator {
+    height: 100%;
+    background-color: var(--color-primary);
+    width: 0%; /* JS lo actualizará */
+    transition: width 0.4s ease-in-out;
+  }
+  
+  .step-indicators {
+    display: flex;
+    justify-content: space-between;
+    list-style: none;
+  }
+  
+  .step-indicator {
+    flex: 1;
+    text-align: center;
+    font-size: 0.9rem;
+    color: var(--color-text-light);
+    position: relative;
+    padding-top: var(--spacing-xs);
+    font-weight: 500;
+  }
+  
+  .step-indicator.active {
+    color: var(--color-primary);
+    font-weight: 700;
+  }
+  .step-indicator.completed {
+    color: var(--color-secondary); 
+  }
+  
+  /* Estructura de Pasos del Formulario */
+  .form-steps-container {
+    margin-bottom: var(--spacing-xl);
+  }
+    
+  .step-content {
+    background-color: var(--color-white);
+  }
+  
+  .step-content h2 {
+    color: var(--color-primary);
+    margin-bottom: var(--spacing-lg);
+    font-size: 1.6rem;
+    font-weight: 600;
+    border-bottom: 1px solid #eee;
+    padding-bottom: var(--spacing-sm);
+  }
+  
+  /* Filas y Grupos de Formulario para layout de 2 columnas en desktop */
+  .form-row {
+    display: flex;
+    flex-wrap: wrap;
+    margin-left: -10px; /* Ajustar gutter si es necesario */
+    margin-right: -10px; /* Ajustar gutter si es necesario */
+  }
+  
+  .form-group {
+    flex: 1 1 100%; /* Por defecto (móvil), ocupa toda la línea */
+    padding-left: 10px; /* Ajustar gutter */
+    padding-right: 10px; /* Ajustar gutter */
+    margin-bottom: var(--spacing-lg);
+  }
+  
+  /* En pantallas de 768px o más, cada .form-group dentro de un .form-row ocupa 50% */
+  @media (min-width: 768px) {
+    .form-group {
+      flex: 0 0 50%;
+      max-width: 50%;
+    }
+    /* Clase opcional si un campo necesita ocupar toda la línea en desktop */
+    .form-group.form-group-fullwidth {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
+  }
+  
+  /* Campos del Formulario */
+  .form-group label {
+    display: block;
+    margin-bottom: var(--spacing-sm); 
+    font-weight: 500;
+    font-size: 0.95rem;
+  }
+  
+  .form-group label .required {
+    color: var(--color-error);
+    margin-left: var(--spacing-xs);
+  }
+  
+  input[type="text"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="date"],
+  select,
+  textarea {
+    width: 100%;
+    padding: var(--spacing-sm) var(--spacing-md); 
+    border: 1px solid #ccc; 
+    border-radius: var(--radius-md); 
+    font-size: 1rem;
+    line-height: 1.5; 
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    background-color: var(--color-white);
+  }
+  select { 
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23333333' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right var(--spacing-md) center;
+    background-size: 1em;
+    padding-right: calc(var(--spacing-md) * 2.5);
+  }
+
+  /* --- ESTILOS DE FOCUS UNIFICADOS --- */
+  input:focus-visible, 
+  select:focus-visible, 
+  textarea:focus-visible,
+  button:focus-visible,
+  .acordeon-header:focus-visible,
+  a.declaration-link:focus-visible {
+    outline: none; /* Quitar outline por defecto si se usa box-shadow */
+    border-color: var(--color-secondary); /* Borde azul médico */
+    box-shadow: 0 0 0 0.2rem rgba(var(--color-secondary-rgb), 0.25); /* Sombra azul médico */
+  }
+  input:focus, 
+  select:focus, 
+  textarea:focus {
+    outline: none;
+    border-color: var(--color-primary); /* Borde terracota */
+    box-shadow: 0 0 0 0.2rem rgba(var(--color-primary-rgb), 0.25); /* Sombra terracota */
+  }
+  
+  /* Estilos de Autofill */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover, 
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus,
+  select:-webkit-autofill,
+  select:-webkit-autofill:hover,
+  select:-webkit-autofill:focus {
+    border: 1px solid var(--color-autofill-border);
+    -webkit-text-fill-color: var(--color-autofill-text);
+    -webkit-box-shadow: 0 0 0px 1000px var(--color-autofill-background) inset, 0 0 0 0.2rem rgba(var(--color-secondary-rgb), 0.1);
+    transition: background-color 600000s 0s, color 600000s 0s; 
+    font-size: 1rem;
+  }
+  
+  input[type="date"] {
+    min-height: calc(1.5em + var(--spacing-sm) * 2 + 2px); 
+    padding-top: var(--spacing-sm);
+    padding-bottom: var(--spacing-sm);
+  }
+
+  /* Campos deshabilitados */
+  input:disabled, select:disabled, textarea:disabled {
+    background-color: #e9ecef;
+    border-color: #ced4da;
+    color: #6c757d;
+    opacity: 0.75;
+    cursor: not-allowed;
+  }
+  
+  /* Validación de Campos */
+  input.is-invalid, select.is-invalid, textarea.is-invalid {
+    border-color: var(--color-error) !important;
+  }
+  input.is-invalid:focus, select.is-invalid:focus, textarea.is-invalid:focus {
+    border-color: var(--color-error) !important;
+    box-shadow: 0 0 0 0.2rem rgba(var(--color-error-rgb), 0.25) !important;
+  }
+  
+  input.is-valid, select.is-valid, textarea.is-valid {
+    border-color: var(--color-success) !important;
+  }
+  input.is-valid:focus, select.is-valid:focus, textarea.is-valid:focus {
+    border-color: var(--color-success) !important;
+    box-shadow: 0 0 0 0.2rem rgba(var(--color-success-rgb), 0.25) !important;
+  }
+  
+  .error-message {
+    display: none; /* Se muestra por JS */
+    color: var(--color-error);
+    font-size: 0.875rem; 
+    margin-top: var(--spacing-xs);
+    width: 100%;
+  }
+
+  /* Estilos para .help-text y .note-text */
+  .form-group .help-text, 
+  .form-group .note-text {
+    display: block;
+    font-size: 0.8em; 
+    color: var(--color-text-light);
+    margin-top: var(--spacing-xs);
+    line-height: 1.3; 
+    transition: opacity 0.3s ease, max-height 0.4s ease-out, margin-top 0.3s ease;
+    opacity: 0;
+    max-height: 0; /* Oculto por defecto */
+    overflow: hidden;
+    box-sizing: content-box;
+  }
+
+  .form-group.field-focused .help-text,
+  .form-group.field-focused .note-text,
+  .form-group.field-has-error .help-text,
+  .form-group.field-has-error .note-text {
+    opacity: 1;
+    max-height: 5em; 
+    margin-top: var(--spacing-xs);
+  }
+
+  .help-text-container .help-text {
+    padding-top: 0;
+  }
+
+  /* Checkbox group */
+  .checkbox-group {
+    display: flex;
+    align-items: center; 
+    padding-top: var(--spacing-sm);
+  }
+  .checkbox-group input[type="checkbox"] {
+    width: auto;
+    height: auto;
+    margin-right: var(--spacing-sm);
+    flex-shrink: 0; 
+    appearance: auto;
+    -webkit-appearance: auto;
+    -moz-appearance: auto;
+    border-radius: var(--radius-sm);
+    border: 1px solid #ccc;
+    vertical-align: middle;
+  }
+  .checkbox-group input[type="checkbox"]:focus-visible {
+      outline: 2px solid var(--color-secondary);
+      outline-offset: 1px;
+      box-shadow: none;
+  }
+  .checkbox-group label {
+    margin-bottom: 0;
+    font-weight: normal; 
+    line-height: 1.3;
+    flex-grow: 1;
+  }
+
+  /* Botones */
+  .form-navigation {
+    display: flex;
+    justify-content: space-between;
+    margin-top: var(--spacing-xl);
+    padding-top: var(--spacing-lg);
+    border-top: 1px solid #e0e0e0;
+  }
+  
+  .btn {
+    display: inline-flex; 
+    align-items: center;
+    justify-content: center;
+    font-weight: 600; 
+    text-align: center;
+    white-space: nowrap;
+    vertical-align: middle;
+    user-select: none;
+    border: 1px solid transparent;
+    padding: var(--spacing-md) var(--spacing-lg); 
+    font-size: 1rem;
+    line-height: 1.5;
+    border-radius: var(--radius-md); 
+    transition: all 0.2s ease-in-out;
+    cursor: pointer;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #e9ecef;
+    border-color: #ced4da;
+    color: #6c757d;
+  }
+  .btn-primary:disabled:hover {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+  
+  .btn-primary {
+    color: var(--color-white);
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #c34e38; 
+    border-color: #b84833;
+    box-shadow: var(--shadow-sm);
+  }
+  
+  .btn-secondary {
+    color: var(--color-text);
+    background-color: #e9ecef; 
+    border-color: #ced4da;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: #d3d9df;
+    box-shadow: var(--shadow-sm);
+  }
+  
+  .btn-success { 
+    color: var(--color-white);
+    background-color: var(--color-success);
+    border-color: var(--color-success);
+  }
+  .btn-success:hover:not(:disabled) {
+    background-color: #218838;
+    border-color: #1e7e34;
+    box-shadow: var(--shadow-sm);
+  }
+  
+  /* Acordeón para Dependientes (Paso 3) */
+  .dependientes-container { margin-top: var(--spacing-lg); }
+  .dependiente-acordeon { 
+    margin-bottom: var(--spacing-md);
+    border: 1px solid #e0e0e0;
+    border-radius: var(--radius-md);
+    background-color: var(--color-white);
+    overflow: hidden;
+  }
+  .acordeon-header { 
+    background-color: #f9f9f9;
+    padding: var(--spacing-md);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background-color 0.2s;
+  }
+  .acordeon-header:hover { background-color: #f0f0f0; }
+  .acordeon-header h3 { 
+    margin: 0; font-size: 1.1rem;
+    font-weight: 600; color: var(--color-secondary);
+  }
+  .acordeon-toggle { 
+    font-size: 1.2rem;
+    color: var(--color-secondary); 
+    transition: transform 0.3s ease;
+    padding: var(--spacing-xs);
+  }
+  .acordeon-header[aria-expanded="true"] .acordeon-toggle .icon-expand { display: none; }
+  .acordeon-header[aria-expanded="false"] .acordeon-toggle .icon-collapse { display: none; }
+  .acordeon-header[aria-expanded="true"] .acordeon-toggle .icon-collapse { display: inline; }
+  .acordeon-header[aria-expanded="false"] .acordeon-toggle .icon-expand { display: inline; }
+
+  .acordeon-content { 
+    padding: var(--spacing-lg); 
+    display: none; 
+    border-top: 1px solid #e0e0e0;
+  }
+
+  /* Estilos para los costos individuales dentro del acordeón de dependientes */
+  .dependiente-cost {
+    margin-top: var(--spacing-md);
+    padding-top: var(--spacing-sm);
+    border-top: 1px dashed #ddd;
+    font-size: 0.9rem;
+  }
+  .dependiente-cost .cost-label {
+    color: var(--color-text-light);
+  }
+  .dependiente-cost .cost-value {
+    font-weight: 500; /* No bold, normal weight for individual dependent cost */
+  }
+   .dependiente-cost .cost-value .calculating {
+    font-style: italic;
+    color: var(--color-text-light);
+  }
+  .dependiente-cost .cost-calculation-note {
+    font-size: 0.8em;
+    color: var(--color-text-light);
+    margin-top: var(--spacing-xs);
+  }
+
+
+  /* Resumen de Costos (Paso 2 y 3) */
+  .cost-summary-container {
+    background-color: #f0f5f8;
+    border-radius: var(--radius-md);
+    padding: var(--spacing-lg);
+    margin-top: var(--spacing-xl);
+    border: 1px solid #d1dbe0;
+  }
+  .cost-summary-container h3 { color: var(--color-secondary); margin-bottom: var(--spacing-md); font-size: 1.2rem;}
+  .cost-summary .cost-item { display: flex; justify-content: space-between; margin-bottom: var(--spacing-sm); font-size: 0.95rem; }
+  .cost-summary .cost-item .cost-label { color: var(--color-text-light); }
+  .cost-summary .cost-item .cost-value { font-weight: 500; /* Normal weight for individual summary items */ color: var(--color-text); }
+  .cost-summary .cost-item.total { margin-top: var(--spacing-md); padding-top: var(--spacing-md); border-top: 1px dashed #ccc; }
+  .cost-summary .cost-item.total .cost-label,
+  .cost-summary .cost-item.total .cost-value { font-size: 1.1rem; font-weight: 700; color: var(--color-primary); } /* Total sigue bold y destacado */
+  .cost-summary .cost-note { font-size: 0.85rem; color: var(--color-secondary); margin-top: var(--spacing-sm); }
+  .cost-summary .cost-update-status { margin-top: var(--spacing-md); }
+  .cost-summary .btn-update-costs {
+      font-size: 0.8rem;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      background-color: transparent;
+      color: var(--color-secondary);
+      border: 1px solid var(--color-secondary);
+  }
+  .cost-summary .btn-update-costs:hover {
+      background-color: var(--color-secondary);
+      color: var(--color-white);
+  }
+  .cost-summary .update-note {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--color-text-light);
+      margin-top: var(--spacing-xs);
+  }
+  
+  /* Declaraciones y Resumen Final (Paso 4) */
+  .declarations-section, .summary-section, .payment-section { 
+    margin-top: var(--spacing-xl);
+    padding-bottom: var(--spacing-lg);
+    border-bottom: 1px solid #eee;
+  }
+  .declarations-section:last-child, .summary-section:last-child, .payment-section:last-child {
+      border-bottom: none;
+  }
+  .declarations-section h3, .summary-section h3, .payment-section h3 {
+      font-size: 1.3rem;
+      color: var(--color-secondary);
+      margin-bottom: var(--spacing-lg);
+  }
+
+  .declarations-section .checkbox-group label { font-size: 0.95rem; }
+  .declaration-link { color: var(--color-secondary); text-decoration: none; border-bottom: 1px dotted var(--color-secondary); }
+  .declaration-link:hover { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+  
+  .summary-block { margin-bottom: var(--spacing-lg); padding-bottom: var(--spacing-md); }
+  .summary-block:not(:last-child) { border-bottom: 1px dashed #ddd; margin-bottom: var(--spacing-lg); padding-bottom: var(--spacing-lg); }
+  .summary-block h4 { font-size: 1.1rem; color: var(--color-primary); margin-bottom: var(--spacing-md); }
+  .summary-row { display: flex; flex-wrap: wrap; margin-bottom: var(--spacing-sm); }
+  .summary-item { flex: 1 1 100%; padding-right: var(--spacing-sm); margin-bottom: var(--spacing-sm); font-size: 0.95rem;}
+   @media (min-width: 576px) {
+       .summary-item { flex: 1 1 50%; }
+   }
+  .summary-item .summary-label { font-weight: 500; color: var(--color-text-light); display: inline-block; min-width: 150px; }
+  .summary-item .summary-value { color: var(--color-text); font-weight: 500; }
+  
+  .dependientes-summary-container .dependiente-summary { padding-bottom: var(--spacing-sm); margin-bottom: var(--spacing-sm); border-bottom: 1px solid #f0f0f0; }
+  .dependientes-summary-container .dependiente-summary:last-child { border-bottom: none; margin-bottom: 0; }
+  .dependientes-summary-container .dependiente-summary h5 {font-size: 1rem; color: var(--color-secondary); margin-bottom: var(--spacing-xs);}
+
+  /* --- Estilos para la Sección de Información de Pago (Paso 4) --- */
+  .payment-details {
+    padding: var(--spacing-md);
+    background-color: #f0f5f8; /* Tu color de fondo */
+    border-radius: var(--radius-md);
+    border: 1px solid #d1dbe0; /* Tu borde */
+  }
+
+  .payment-item { /* Para "Plan: ONCOSALUD" y "Periodicidad: Mensual" */
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: var(--spacing-sm);
+  }
+
+  .payment-label { /* Para "Plan:" y "Periodicidad:" */
+    font-weight: 600; /* MODIFICADO */
+    color: var(--color-text);
+    padding-right: var(--spacing-md);
+  }
+
+  .payment-value { /* Para "ONCOSALUD" y "Mensual" */
+    font-weight: 500; /* Semi-bold para los valores principales del plan/periodicidad */
+    color: var(--color-text); 
+    text-align: right; 
+  }
+
+  .payment-breakdown { /* Contenedor de "Titular", "Dependientes", "Monto total" */
+    margin-top: var(--spacing-md);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid #d1dbe0; /* Tu separador */
+  }
+
+  .payment-detail-item {
+    display: flex; 
+    justify-content: space-between; 
+    align-items: baseline; 
+    font-size: 0.95rem;
+    margin-bottom: var(--spacing-sm); 
+  }
+
+  .payment-detail-item .payment-detail-label {
+    font-weight: 600; /* MODIFICADO */
+    color: var(--color-text);
+    padding-right: var(--spacing-md);
+  }
+
+  .payment-detail-item .payment-detail-value {
+    min-width: 100px; /* AJUSTA ESTE VALOR SEGÚN NECESITES (ej. 90px, 110px, 120px) */
+    text-align: right; 
+    font-weight: normal; /* No bold para montos de Titular/Dependientes */
+    color: var(--color-text);
+  }
+
+  .payment-detail-item.total {
+    margin-top: var(--spacing-md); 
+    padding-top: var(--spacing-sm); 
+  }
+
+  .payment-detail-item.total > .payment-detail-label,
+  .payment-detail-item.total > .payment-detail-value {
+    font-weight: bold; /* Total sí va en negrita */
+    font-size: 1.15rem; /* Total más grande */
+    color: var(--color-primary); /* Total en color primario */
+  }
+
+  .payment-detail-item.total > .payment-detail-value {
+    min-width: 100px; /* Mismo min-width para alineación */
+    text-align: right;
+  }
+
+  .payment-info {
+    margin-top: var(--spacing-md);
+    font-size: 0.9rem;
+  }
+
+  .payment-note .discount-icon { 
+    margin-right: var(--spacing-xs);
+  }
+
+  .payment-process-info p {
+    margin-bottom: var(--spacing-sm);
+    line-height: 1.5;
+  }
+  /* --- Fin de Estilos para la Sección de Información de Pago --- */
+
+  .form-actions.final-actions { margin-top: var(--spacing-xl); text-align: center; border-top: 1px solid #eee; padding-top: var(--spacing-lg); }
+  .processing-indicator { display: none; align-items: center; justify-content: center; margin-top: var(--spacing-md); color: var(--color-secondary); }
+  .processing-indicator .spinner { margin-right: var(--spacing-sm); width: 20px; height: 20px; border-width: 3px; }
+  .form-error-message { display: none; color: var(--color-error); background-color: rgba(var(--color-error-rgb), 0.05); border: 1px solid rgba(var(--color-error-rgb), 0.3); padding: var(--spacing-md); border-radius: var(--radius-sm); margin-top: var(--spacing-md); }
+  .support-contact { margin-top: var(--spacing-lg); font-size: 0.9rem; color: var(--color-text-light); }
+  .support-contact a { color: var(--color-secondary); }
+  
+  /* Notificaciones (Global) */
+  .notification-area {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1050; 
+    width: auto;
+    max-width: 380px;
+  }
+  .notification {
+    background-color: var(--color-white);
+    color: var(--color-text);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    display: flex;
+    align-items: flex-start; 
+    opacity: 1;
+    transition: opacity 0.3s ease, transform 0.3s ease, margin-bottom 0.3s ease;
+    transform: translateX(0);
+  }
+  .notification.notification-hiding {
+    opacity: 0;
+    transform: translateX(120%);
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    height: 0;
+    overflow: hidden;
+  }
+  .notification-icon { margin-right: var(--spacing-md); font-size: 1.5rem; line-height: 1; flex-shrink: 0; margin-top: 2px; }
+  .notification-success .notification-icon { color: var(--color-success); }
+  .notification-error .notification-icon { color: var(--color-error); }
+  .notification-warning .notification-icon { color: var(--color-warning); }
+  .notification-info .notification-icon { color: var(--color-info); }
+  .notification-message { flex-grow: 1; font-size: 0.95rem; }
+  .notification-close {
+    background: transparent; border: none; color: var(--color-text-light);
+    font-size: 1.6rem; line-height: 1;
+    cursor: pointer; padding: 0 0 0 var(--spacing-sm);
+    opacity: 0.6; margin-left: var(--spacing-sm);
+  }
+  .notification-close:hover { opacity: 1; }
+  
+  /* Indicador de Carga Global (Superposición) */
+  .loading-indicator.global-loading { 
+    display: none; position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(var(--color-white-rgb, 255, 255, 255), 0.9);
+    z-index: 2000; 
+    display: flex; 
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .loading-indicator.global-loading .spinner { 
+    width: 50px; height: 50px; border-width: 5px; border-top-color: var(--color-primary);
+  }
+  .loading-indicator.global-loading .loading-text { font-size: 1.1rem; color: var(--color-primary); margin-top: var(--spacing-md); }
+  
+  /* Mejoras de Accesibilidad */
+  [aria-current="step"] { font-weight: bold; }
+  
+  /* Responsividad */
+  @media (max-width: 768px) {
+    body { padding: var(--spacing-sm); }
+    .container { padding: var(--spacing-md); margin-top: var(--spacing-sm); }
+    .form-header img.logo { max-width: 150px; }
+    .form-header h1 { font-size: 1.6rem; }
+    .step-content h2 { font-size: 1.4rem; }
+    .form-navigation { flex-direction: column; gap: var(--spacing-md); }
+    .btn { width: 100%; }
+    .step-indicators { display: none; } 
+    
+    .form-row { margin-left: 0; margin-right: 0; }
+    .form-group { padding-left: 0; padding-right: 0; }
+
+    .summary-row { flex-direction: column; }
+    .summary-item { flex-basis: 100%; padding-right: 0; }
+
+    .notification-area { width: calc(100% - 2 * var(--spacing-sm)); left: var(--spacing-sm); right: var(--spacing-sm); max-width: none; top: var(--spacing-sm); }
+  }
+  @media (max-width: 480px) {
+    :root { 
+        --spacing-md: 0.75rem;
+        --spacing-lg: 1rem;
+        --spacing-xl: 1.5rem;
+    }
+    .form-header h1 { font-size: 1.4rem; }
+    .step-content h2 { font-size: 1.2rem; }
+    .btn { padding: var(--spacing-sm) var(--spacing-md); }
+  }
+
+  /* Estilos para la barra de debug (opcional) */
+  .debug-toolbar {
+    position: fixed; bottom: 0; left: 0; width: 100%;
+    background-color: rgba(0,0,0,0.85); color: white;
+    padding: var(--spacing-xs) var(--spacing-sm);
+    z-index: 3000; font-size: 0.8rem;
+    box-shadow: 0 -2px 5px rgba(0,0,0,0.2);
+  }
+  .debug-toolbar-header { font-weight: bold; margin-bottom: var(--spacing-xs); border-bottom: 1px solid #444; padding-bottom: var(--spacing-xs);}
+  .debug-toolbar-content { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--spacing-xs); }
+  .debug-toolbar-content div:first-child { flex-basis: 100%; margin-bottom: var(--spacing-xs); }
+   @media (min-width: 400px) { 
+      .debug-toolbar-content div:first-child { flex-basis: auto; margin-bottom: 0; }
+   }
+  .debug-toolbar-content button {
+    background-color: var(--color-secondary); color: white; border: none;
+    padding: 3px 8px; margin-left: 4px; border-radius: var(--radius-sm);
+    cursor: pointer; font-size: 0.75rem; transition: background-color 0.2s;
+  }
+  .debug-toolbar-content button:hover { background-color: var(--color-primary); }
+
+  /* Estilo para el mensaje de "no dependientes" en Paso 3 y 4 */
+  .message-info, #no-dependientes, #dependientes-summary-container p {
+    background-color: rgba(var(--color-info-rgb), 0.1);
+    color: var(--color-info);
+    border: 1px solid rgba(var(--color-info-rgb), 0.3);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-sm);
+    text-align: center;
+    margin-top: var(--spacing-md);
+  }
+
+  /* Estilo para modales de declaraciones */
+  .declaration-modal {
+    display: none; /* Se muestra por JS */
+    position: fixed;
+    z-index: 1060; /* Encima de la notification-area */
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.6);
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-content-wrapper {
+    background-color: var(--color-white);
+    margin: auto;
+    padding: var(--spacing-lg);
+    border: 1px solid #888;
+    width: 90%;
+    max-width: 700px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    position: relative;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .modal-content-wrapper h3 { /* Este es el título DENTRO del modal */
+    color: var(--color-primary);
+    margin-top: 0;
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid #eee;
+  }
+  .modal-body-content {
+    overflow-y: auto; /* Scroll para contenido largo */
+    font-size: 0.9rem;
+    line-height: 1.7;
+  }
+  .modal-body-content p {
+      margin-bottom: var(--spacing-sm);
+  }
+  
+  /* --- INICIO: Botón de Cierre del Modal de Declaraciones (Paso 4) --- */
+  .modal-close-button {
+    position: absolute;
+    top: 10px; 
+    right: 10px; 
+    width: 30px; 
+    height: 30px; 
+    background-color: #f1f1f1; 
+    border: 1px solid #d0d0d0; 
+    border-radius: 50%; 
+    color: var(--color-text-light); 
+    font-family: Arial, sans-serif; 
+    font-size: 20px; 
+    font-weight: normal; 
+    line-height: 1; 
+    text-align: center; 
+    cursor: pointer;
+    padding: 0; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out;
+    -webkit-appearance: none; 
+    -moz-appearance: none; 
+    appearance: none; 
+  }
+
+  .modal-close-button:hover,
+  .modal-close-button:focus {
+    background-color: #e0e0e0; 
+    color: var(--color-primary); 
+    border-color: #b0b0b0; 
+    text-decoration: none; 
+    outline: none; 
+  }
+  /* --- FIN: Botón de Cierre del Modal de Declaraciones --- */
+  
+  /* Estilo para el spinner "Calculando..." en costos */
+  .calculating {
+      font-style: italic;
+      color: var(--color-text-light);
+      font-size: 0.85em;
+  }
+
+  /* Estilos para el Pie de Página Personalizado */
+  .form-footer {
+    text-align: center;
+    margin-top: var(--spacing-xl); 
+    padding-top: var(--spacing-lg); 
+    border-top: 1px solid #e0e0e0; 
+    font-size: 0.85em; 
+    color: var(--color-text-light); 
+  }
+
+  .form-footer p {
+    margin-bottom: var(--spacing-xs); 
+    line-height: 1.4;
+  }
+
+  .form-footer p:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Estilo para el placeholder de carga inicial del formulario */
+  .initial-loading-placeholder {
+    color: var(--color-text-light);
+    font-style: italic;
+  }
+</style>

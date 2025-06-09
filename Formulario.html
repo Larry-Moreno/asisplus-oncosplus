@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <base target="_top">
+  <title>Programa ONCOPLUS - Formulario de Afiliación</title>
+  
+  <?!= include('css_Estilos'); ?>
+    
+  <?!= include('js_Utilidades'); ?>
+
+</head>
+<body>
+  <div class="container" id="app-container"> <header class="form-header">
+      <img src="https://lh3.googleusercontent.com/d/1Hcd8Yf8FpsMC_vCqTFG8FACY-kL4VFAK" alt="Logo ASISPLUS-ONCOPLUS" class="logo">
+      <h1>Programa ONCOPLUS</h1>
+    </header>
+    
+    <div class="progress-container">
+      <div class="progress-bar">
+        <div class="progress-indicator" id="progress-indicator" aria-label="Progreso del formulario"></div>
+      </div>
+      <div class="step-indicators" aria-label="Pasos del formulario">
+        <div class="step-indicator active" data-step="1" aria-current="step">1. Datos del Titular</div>
+        <div class="step-indicator" data-step="2">2. Contacto y Preferencias</div>
+        <div class="step-indicator" data-step="3">3. Dependientes</div>
+        <div class="step-indicator" data-step="4">4. Confirmación</div>
+      </div>
+    </div>
+    
+    <div class="form-steps-container">
+      <div id="step-container" role="region" aria-live="polite">
+          <div class="initial-loading-placeholder" style="text-align: center; padding: 20px;">
+              Cargando formulario...
+          </div>
+      </div>
+    </div>
+    
+    <div class="form-navigation">
+      <button type="button" id="btn-back" class="btn btn-secondary" aria-label="Volver al paso anterior">Anterior</button>
+      <button type="button" id="btn-next" class="btn btn-primary" aria-label="Avanzar al siguiente paso">Siguiente</button>
+      <button type="button" id="btn-submit" class="btn btn-success" style="display: none;" aria-label="Enviar formulario de afiliación">Completar Registro</button>
+    </div>
+    
+    <div id="notification-area" class="notification-area" role="status" aria-live="assertive"></div>
+
+    <footer class="form-footer">
+      <p>© ASISPLUS 2025. Todos los derechos reservados.</p>
+      <p>Powered by NODIKA Systems</p>
+    </footer>
+
+  </div> <?!= include('js_FormularioWizard'); ?>
+
+  </body>
+</html>

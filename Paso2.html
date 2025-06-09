@@ -1,0 +1,110 @@
+<div class="step-content" id="step-2">
+  <h2>Contacto y Preferencias</h2>
+  
+  <div class="form-row">
+    <div class="form-group form-group-fullwidth">
+      <label for="email">Correo electrónico <span class="required">*</span></label>
+      <input type="email" id="email" name="email" required
+             data-validation="required|email" data-validation-message="Ingrese un correo electrónico válido"
+             aria-required="true" autocomplete="email"
+             aria-describedby="email-help">
+      <div class="error-message" id="email-error"></div>
+      <small class="help-text" id="email-help">Recibirás confirmaciones y actualizaciones importantes en este correo.</small>
+    </div>
+  </div>
+  
+  <div class="form-row">
+    <div class="form-group form-group-fullwidth">
+      <label for="telefono">Teléfono <span class="required">*</span></label>
+      <input type="tel" id="telefono" name="telefono" required
+             data-validation="required|phone" 
+             data-validation-message="Ingrese un número telefónico válido de 9 dígitos"
+             aria-required="true"
+             placeholder="Ej: 987654321"
+             maxlength="9" autocomplete="tel-national"
+             aria-describedby="telefono-help">
+      <div class="error-message" id="telefono-error"></div>
+      <small class="help-text" id="telefono-help">Debe ser un número de 9 dígitos (formato peruano). Para números internacionales, por favor contacte a soporte.</small>
+    </div>
+  </div>
+  
+  <div class="form-row">
+    <div class="form-group form-group-fullwidth"> 
+      <label for="periodicidadPago">Periodicidad de pago <span class="required">*</span></label>
+      <select id="periodicidadPago" name="periodicidadPago" required
+              data-validation="required" data-validation-message="Seleccione una opción de periodicidad"
+              aria-required="true"
+              data-controls="pagoRecurrente,resumenCostos">
+        <option value="Mensual" selected>Mensual</option>
+        </select>
+      <div class="error-message" id="periodicidadPago-error"></div>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group form-group-fullwidth">
+      <label for="numeroDependientes">¿Cuántos dependientes deseas agregar a tu póliza? <span class="required">*</span></label>
+      <select id="numeroDependientes" name="numeroDependientes" required
+              data-validation="required" data-validation-message="Seleccione el número de dependientes"
+              aria-required="true"
+              data-controls="resumenCostos">
+        <option value="0">0 - Solo titular</option>
+        <option value="1">1 dependiente</option>
+        <option value="2">2 dependientes</option>
+        <option value="3">3 dependientes</option>
+        <option value="4">4 dependientes</option>
+      </select>
+      <div class="error-message" id="numeroDependientes-error"></div>
+      <small class="help-text">Máximo 4 dependientes por titular.</small>
+    </div>
+  </div>
+  
+  <div class="form-row">
+    <div class="form-group checkbox-group col-md-6">
+      <input type="checkbox" id="pagoRecurrente" name="pagoRecurrente"
+             data-validation="required" data-validation-message="Debe aceptar el débito automático para continuar."
+             aria-required="true" aria-describedby="pagoRecurrente-help-text">
+      <label for="pagoRecurrente">Acepto que los pagos se debiten automáticamente de mi cuenta.<span class="required">*</span></label>
+      <div class="error-message" id="pagoRecurrente-error"></div>
+    </div>
+    <div class="form-group col-md-6 help-text-container">
+      <small class="help-text" id="pagoRecurrente-help-text">Tu tarjeta será debitada automáticamente cada mes.</small>
+    </div>
+  </div>
+  
+  <div class="form-row">
+    <div class="form-group checkbox-group col-md-6">
+      <input type="checkbox" id="whatsapp" name="whatsapp"
+             aria-describedby="whatsapp-help-text">
+      <label for="whatsapp">Acepto recibir comunicaciones relacionadas con mi afiliación y recordatorios de pago a través de WhatsApp.</label>
+    </div>
+    <div class="form-group col-md-6 help-text-container">
+       <small class="help-text" id="whatsapp-help-text">Esto incluye mensajes sobre tu afiliación, recordatorios de pago y actualizaciones importantes.</small>
+    </div>
+  </div>
+  
+  <div class="cost-summary-container">
+    <h3>Resumen de costos</h3>
+    <div id="resumenCostos" class="cost-summary">
+      <div class="cost-item">
+        <span class="cost-label">Titular:</span>
+        <span class="cost-value" id="costoTitular">S/ 0.00</span>
+      </div>
+      <div class="cost-item" id="costoDependientesContainer" style="display: none;">
+        <span class="cost-label">Dependientes:</span>
+        <span class="cost-value" id="costoDependientes">S/ 0.00</span>
+      </div>
+      <div class="cost-item total">
+        <span class="cost-label">Total (<span id="periodicidadResumenTexto">Mensual</span>):</span>
+        <span class="cost-value" id="costoTotal">S/ 0.00</span>
+      </div>
+      <div class="cost-note" id="descuentoAnual" style="display: none;">
+        </div>
+
+      <div class="cost-note" style="margin-top: 10px;">
+        <span>Periodicidad: <span id="periodicidadResumenTextoP2">Mensual</span></span>
+      </div>
+      <div class="cost-update-status" style="margin-top: 5px;">
+        <span class="update-note">Los costos se calculan automáticamente según la edad.</span>
+      </div>
+      </div> </div> </div> ```

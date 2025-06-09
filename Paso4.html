@@ -1,0 +1,162 @@
+<div class="step-content" id="step-4">
+  <h2>Declaraciones y Confirmación</h2>
+  
+  <div class="summary-section">
+    <h3>Resumen de Afiliación</h3>
+    <div class="summary-content" id="summary-content">
+      <!-- Estructura para el resumen -->
+      <div class="summary-block titular-summary">
+        <h4>Datos del Titular</h4>
+        <div class="summary-row">
+          <div class="summary-item">
+            <span class="summary-label">Nombre completo:</span>
+            <span class="summary-value" id="summary-titular-nombre"></span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Documento:</span>
+            <span class="summary-value" id="summary-titular-documento"></span>
+          </div>
+        </div>
+        <div class="summary-row">
+          <div class="summary-item">
+            <span class="summary-label">Fecha de nacimiento:</span>
+            <span class="summary-value" id="summary-titular-nacimiento"></span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Edad:</span>
+            <span class="summary-value" id="summary-titular-edad"></span>
+          </div>
+        </div>
+        <div class="summary-row">
+          <div class="summary-item">
+            <span class="summary-label">Correo electrónico:</span>
+            <span class="summary-value" id="summary-titular-email"></span>
+          </div>
+          <div class="summary-item">
+            <span class="summary-label">Teléfono:</span>
+            <span class="summary-value" id="summary-titular-telefono"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-block dependientes-summary" id="dependientes-summary-block">
+        <h4>Dependientes</h4>
+        <div id="dependientes-summary-container">
+          <!-- Se generará dinámicamente basado en los dependientes ingresados -->
+          <div class="dependiente-summary-template" style="display: none;">
+            <div class="dependiente-summary" data-dependiente-index="0">
+              <h5>Dependiente <span class="dependiente-num">1</span></h5>
+              <div class="summary-row">
+                <div class="summary-item">
+                  <span class="summary-label">Nombre completo:</span>
+                  <span class="summary-value dependiente-nombre"></span>
+                </div>
+                <div class="summary-item">
+                  <span class="summary-label">Parentesco:</span>
+                  <span class="summary-value dependiente-parentesco"></span>
+                </div>
+              </div>
+              <div class="summary-row">
+                <div class="summary-item">
+                  <span class="summary-label">Documento:</span>
+                  <span class="summary-value dependiente-documento"></span>
+                </div>
+                <div class="summary-item">
+                  <span class="summary-label">Edad:</span>
+                  <span class="summary-value dependiente-edad"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="no-dependientes-message" id="no-dependientes-message" style="display: none;">
+          No se han registrado dependientes.
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="declarations-section">
+    <h3>Declaraciones</h3>
+    
+    <div class="form-row">
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="declaracionSalud" name="declaracionSalud" required
+               data-validation="required" data-validation-message="Debe aceptar la declaración de salud"
+               aria-required="true">
+        <label for="declaracionSalud">He leído y acepto la <a href="#" class="declaration-link" data-declaration="salud" aria-haspopup="dialog">declaración de salud</a>. <span class="required">*</span></label>
+        <div class="error-message" id="declaracionSalud-error"></div>
+      </div>
+    </div>
+    
+    <div class="form-row">
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="declaracionJurada" name="declaracionJurada" required
+               data-validation="required" data-validation-message="Debe aceptar la declaración jurada"
+               aria-required="true">
+        <label for="declaracionJurada">He leído y acepto la <a href="#" class="declaration-link" data-declaration="jurada" aria-haspopup="dialog">declaración jurada</a>. <span class="required">*</span></label>
+        <div class="error-message" id="declaracionJurada-error"></div>
+      </div>
+    </div>
+    
+    <div class="form-row">
+      <div class="form-group checkbox-group">
+        <input type="checkbox" id="declaracionPrivacidad" name="declaracionPrivacidad" required
+               data-validation="required" data-validation-message="Debe aceptar la declaración de privacidad"
+               aria-required="true">
+        <label for="declaracionPrivacidad">He leído y acepto la <a href="#" class="declaration-link" data-declaration="privacidad" aria-haspopup="dialog">declaración de privacidad y el tratamiento de mis datos personales</a>. <span class="required">*</span></label>
+        <div class="error-message" id="declaracionPrivacidad-error"></div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="payment-section">
+    <h3>Información de Pago</h3>
+    <div class="payment-details">
+      <div class="payment-item">
+        <span class="payment-label">Plan:</span>
+        <span class="payment-value" id="plan-value">ONCOSALUD</span>
+      </div>
+      <div class="payment-item">
+        <span class="payment-label">Periodicidad:</span>
+        <span class="payment-value" id="periodicidad-value">Mensual</span>
+      </div>
+      <div class="payment-breakdown">
+        <div class="payment-detail-item">
+          <span class="payment-detail-label">Titular:</span>
+          <span class="payment-detail-value" id="monto-titular">S/ 0.00</span>
+        </div>
+        <div class="payment-detail-item" id="monto-dependientes-container">
+          <span class="payment-detail-label">Dependientes:</span>
+          <span class="payment-detail-value" id="monto-dependientes">S/ 0.00</span>
+        </div>
+        <div class="payment-detail-item total">
+          <span class="payment-detail-label">Monto total:</span>
+          <span class="payment-detail-value" id="monto-total-value">S/ 0.00</span>
+        </div>
+      </div>
+      <div class="payment-info">
+        <div class="payment-note" id="descuento-nota" style="display: none;">
+          <span class="discount-icon">💰</span> Se ha aplicado un descuento del 5% por pago anual.
+        </div>
+        <div class="payment-process-info">
+          <p><strong>Proceso de pago:</strong> Al hacer clic en "Completar registro", serás redirigido a la plataforma segura de Mercado Pago para completar el proceso.</p>
+          <p id="payment-recurrence-info">Has seleccionado pago recurrente. Tu tarjeta será debitada automáticamente cada mes.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+<div class="form-actions final-actions">
+    <div class="form-action-row">
+      </div>
+    <div class="processing-indicator" id="processing-indicator" style="display: none;">
+      <div class="spinner"></div>
+      <span>Procesando solicitud, por favor espere...</span>
+    </div>
+    <div class="form-error-message" id="form-error-message" style="display: none;"></div>
+    <div class="support-contact">
+      <p>¿Tienes dudas? Comunícate con nuestro equipo de soporte al <strong>(01) 513-7900</strong> o escribe a <strong>soporte@asisplus.com</strong></p>
+    </div>
+  </div>
+</div>

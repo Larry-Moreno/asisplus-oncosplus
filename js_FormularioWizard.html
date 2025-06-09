@@ -1,0 +1,1846 @@
+<script>
+/**
+ * Control mejorado del formulario wizard ASISPLUS-ONCOPLUS
+ * Incluye:
+ * - Estado global (FormState) y Bus de Eventos (EventBus)
+ * - Inicialización del formulario y carga de pasos
+ * - Gestión de caché (sessionStorage)
+ * - Navegación entre pasos
+ * - Lógica de validación de campos y pasos (usando js_Utilidades.html)
+ * - Manejo de eventos específicos para cada paso (Paso 1, 2, 3, 4)
+ * - Cálculo y actualización dinámica de costos (solo ASISPLUS, solo Mensual por ahora)
+ * - Lógica para el resumen y envío del formulario
+ * - Mejoras de UI/UX y accesibilidad básica
+ *
+ * Versión consolidada y actualizada.
+ */
+
+// =====================================================================================
+// PARTE 1: ESTADO GLOBAL, BUS DE EVENTOS, INICIALIZACIÓN Y GESTIÓN DE CACHÉ
+// =====================================================================================
+
+const FormState = {
+  currentStep: 1,
+  totalSteps: 4,
+  costoTitular: 0,
+  costoDependientes: 0,
+  dependientesCostos: {}, // { 1: costoDep1, 2: costoDep2, ... } (índice UI base 1)
+  
+  setCurrentStep(step) {
+    this.currentStep = parseInt(step);
+  },
+  setCostoTitular(costo) {
+    this.costoTitular = parseFloat(costo) || 0;
+  },
+  setCostoDependiente(index, costo) {
+    const depUiIndex = parseInt(index);
+    this.dependientesCostos[depUiIndex] = parseFloat(costo) || 0;
+    this.recalculateCostoTotalDependientes();
+  },
+  recalculateCostoTotalDependientes() {
+    this.costoDependientes = Object.values(this.dependientesCostos)
+                                 .reduce((total, c) => total + (parseFloat(c) || 0), 0);
+  },
+  resetCostosDependientes() {
+    this.dependientesCostos = {};
+    this.costoDependientes = 0;
+  },
+  getCostoTotal(periodicidad) { 
+    const p = (periodicidad || 'Mensual').toLowerCase(); // Default a Mensual
+    const costoBase = (this.costoTitular || 0) + (this.costoDependientes || 0);
+    
+    // Lógica de descuento anual desactivada temporalmente
+    // if (p === 'anual') {
+    //   return costoBase * 12 * 0.95; 
+    // }
+    return costoBase; // Como solo es mensual, no hay factor 12 ni descuento
+  }
+};
+
+const EventBus = {
+  events: {},
+  subscribe(eventName, callback) {
+    if (!this.events[eventName]) this.events[eventName] = [];
+    this.events[eventName].push(callback);
+    return () => {
+      this.events[eventName] = this.events[eventName].filter(cb => cb !== callback);
+    };
+  },
+  publish(eventName, data) {
+    if (this.events[eventName]) {
+      this.events[eventName].forEach(callback => callback(data));
+    }
+  }
+};
+
+const fieldDebounceTimers = {};
+const lastCostRequestIdForDependent = {}; // <--- AÑADE O VERIFICA ESTA LÍNEA
+let lastCostRequestIdForTitular = null; // <--- AÑADE ESTA LÍNEA
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (!$('#notification-area')) {
+    const area = document.createElement('div');
+    area.id = 'notification-area'; area.className = 'notification-area';
+    area.setAttribute('aria-live', 'polite'); area.setAttribute('role', 'status');
+    document.body.appendChild(area);
+  }
+
+  // ----- INICIO DE PASO A (Limpieza Temporal de Caché) -----
+  sessionStorage.removeItem('formCacheASISPLUS'); 
+  console.log('formCacheASISPLUS limpiado de sessionStorage al inicio para pruebas.');
+  // ----- FIN DE PASO A -----
+  
+  initCacheSystem(); // Ahora initCacheSystem() debería encontrar sessionStorage vacío
+  enhanceAutoFillDetection();
+  setupAccessibility();
+  
+  let initialStep = 1; 
+  if (window.formCache && window.formCache.currentStep) {
+     initialStep = parseInt(window.formCache.currentStep) || 1;
+     if (initialStep < 1 || initialStep > FormState.totalSteps) initialStep = 1;
+  }
+  FormState.setCurrentStep(initialStep); 
+  loadStep(FormState.currentStep); 
+  
+  setupNavigation();
+  setupValidationsListeners(); 
+  setupGlobalWizardEvents(); 
+  setupFocusHelpTextListeners(); // Para mostrar/ocultar help-text
+  
+  adjustInterfaceForDevice();    
+
+  if (location.search.includes('debug=true')) enableDebugMode();
+});
+
+function initCacheSystem() {
+  window.formCache = {}; 
+  const savedCache = sessionStorage.getItem('formCacheASISPLUS');
+  if (savedCache) {
+    try {
+      window.formCache = JSON.parse(savedCache);
+      
+      // Cargar costo del titular desde el caché si existe
+      if (typeof window.formCache.fs_costoTitular !== 'undefined') {
+        FormState.setCostoTitular(window.formCache.fs_costoTitular);
+        // ----- INICIO DE LÍNEA AÑADIDA PARA MODIFICACIÓN 2 -----
+        console.log('CACHE INICIAL - FormState.costoTitular CARGADO desde fs_costoTitular:', FormState.costoTitular); // <--- ESTE ES EL NUEVO LOG
+        // ----- FIN DE LÍNEA AÑADIDA PARA MODIFICACIÓN 2 -----
+      }
+      
+      // Cargar costos de dependientes desde el caché si existen
+      if (window.formCache.fs_dependientesCostos) {
+        FormState.dependientesCostos = JSON.parse(JSON.stringify(window.formCache.fs_dependientesCostos));
+        FormState.recalculateCostoTotalDependientes();
+      }
+      
+      // Cargar el paso actual desde el caché si existe
+      if (window.formCache.currentStep) { 
+        FormState.setCurrentStep(parseInt(window.formCache.currentStep));
+      }
+      
+      console.log("Caché general cargado desde sessionStorage:", window.formCache); // Este log ya lo tenías y es bueno.
+    } catch (e) {
+      console.warn("Error cargando caché, iniciando vacío:", e);
+      window.formCache = {};
+      sessionStorage.removeItem('formCacheASISPLUS');
+    }
+  }
+}
+
+function saveToCache() {// Aproximadamente en la línea 553 de js_FormularioWizard.html-VGEM.6.txt
+  try {
+    const currentStepId = `#step-${FormState.currentStep}`;
+    if ($(currentStepId)) {
+        const inputs = $$(`${currentStepId} input, ${currentStepId} select, ${currentStepId} textarea`);
+        inputs.forEach(input => {
+            const fieldKey = input.id || input.name;
+            if (fieldKey) {
+                if (input.type === 'checkbox') {
+                    window.formCache[fieldKey] = input.checked;
+                } else {
+                    window.formCache[fieldKey] = input.value;
+                }
+            }
+        });
+    }
+
+    // ---- INICIO DE NUEVO LOG PARA DATOS DE DEPENDIENTES ----
+    if (FormState.currentStep === 3) {
+      const numDependientes = parseInt(window.formCache.numeroDependientes || 0);
+      if (numDependientes > 0) {
+        console.log(`SAVE_TO_CACHE (Paso 3) - Intentando guardar datos para ${numDependientes} dependientes:`);
+        for (let i = 0; i < numDependientes; i++) { // El caché usa índice 0 para los datos del dependiente
+          const depUiIndex = i + 1; // Para los IDs de los campos que son base 1
+          const camposDependiente = {
+            primerNombre: $(`#primerNombre-${depUiIndex}`) ? $(`#primerNombre-${depUiIndex}`).value : 'NO ENCONTRADO',
+            segundoNombre: $(`#segundoNombre-${depUiIndex}`) ? $(`#segundoNombre-${depUiIndex}`).value : 'NO ENCONTRADO',
+            apellidoPaterno: $(`#apellidoPaterno-${depUiIndex}`) ? $(`#apellidoPaterno-${depUiIndex}`).value : 'NO ENCONTRADO',
+            apellidoMaterno: $(`#apellidoMaterno-${depUiIndex}`) ? $(`#apellidoMaterno-${depUiIndex}`).value : 'NO ENCONTRADO',
+            tipoDocumento: $(`#tipoDocumento-${depUiIndex}`) ? $(`#tipoDocumento-${depUiIndex}`).value : 'NO ENCONTRADO',
+            numeroDocumento: $(`#numeroDocumento-${depUiIndex}`) ? $(`#numeroDocumento-${depUiIndex}`).value : 'NO ENCONTRADO',
+            fechaNacimiento: $(`#fechaNacimiento-${depUiIndex}`) ? $(`#fechaNacimiento-${depUiIndex}`).value : 'NO ENCONTRADO',
+            sexo: $(`#sexo-${depUiIndex}`) ? $(`#sexo-${depUiIndex}`).value : 'NO ENCONTRADO',
+            parentesco: $(`#parentesco-${depUiIndex}`) ? $(`#parentesco-${depUiIndex}`).value : 'NO ENCONTRADO',
+            paisNacimiento: $(`#paisNacimiento-${depUiIndex}`) ? $(`#paisNacimiento-${depUiIndex}`).value : 'NO ENCONTRADO',
+            // Añade aquí cualquier otro campo de input del dependiente que necesites rastrear
+          };
+          console.log(`  Dependiente ${depUiIndex} (datos del DOM para caché):`, camposDependiente);
+          // Guardamos explícitamente en window.formCache con el prefijo 'depX_' que usas para el caché de costos
+          // Esta parte ya la haces arriba con el querySelectorAll, pero aquí es para loguear y verificar
+          // Es importante que los 'fieldKey' generados por el querySelectorAll coincidan con lo que esperas
+          // Ejemplo: window.formCache['primerNombre-1'], window.formCache['fechaNacimiento-1']
+        }
+      } else {
+        console.log("SAVE_TO_CACHE (Paso 3) - No hay dependientes seleccionados.");
+      }
+    }
+    // ---- FIN DE NUEVO LOG ----
+
+    window.formCache.fs_costoTitular = FormState.costoTitular;
+    window.formCache.fs_costoDependientes = FormState.costoDependientes;
+    window.formCache.fs_dependientesCostos = JSON.parse(JSON.stringify(FormState.dependientesCostos));
+    window.formCache.currentStep = FormState.currentStep;
+
+    sessionStorage.setItem('formCacheASISPLUS', JSON.stringify(window.formCache));
+    console.log('SAVE_TO_CACHE: Datos guardados en sessionStorage. Caché actual:', JSON.parse(JSON.stringify(window.formCache))); // Log para ver todo el caché
+    return true;
+  } catch (e) {
+    console.error("Error guardando en caché:", e);
+    showNotification("Se produjo un error al guardar sus datos.", "error");
+    return false;
+  }
+}
+
+// ESTA ES TU FUNCIÓN loadFromCache() CON EL LOG AÑADIDO
+function loadFromCache() {
+  try {
+    if (!window.formCache) return false;
+
+    // Restaurar costos en FormState desde el caché global
+    if (typeof window.formCache.fs_costoTitular !== 'undefined') {
+        FormState.setCostoTitular(window.formCache.fs_costoTitular);
+        // ----- INICIO DE LÍNEA AÑADIDA PARA MODIFICACIÓN 3 -----
+        console.log('LOAD FROM CACHE (al cargar Paso ' + FormState.currentStep + ') - FormState.costoTitular RESTAURADO:', FormState.costoTitular); // <--- ESTE ES EL NUEVO LOG
+        // ----- FIN DE LÍNEA AÑADIDA PARA MODIFICACIÓN 3 -----
+    }
+    if (window.formCache.fs_dependientesCostos) {
+        FormState.dependientesCostos = JSON.parse(JSON.stringify(window.formCache.fs_dependientesCostos));
+        FormState.recalculateCostoTotalDependientes();
+    } else {
+        FormState.resetCostosDependientes(); // Asegurar que se resetea si no hay nada en caché
+    }
+  
+    const currentStepId = `#step-${FormState.currentStep}`;
+    if (!$(currentStepId)) {
+        console.warn(`Contenedor del paso ${FormState.currentStep} no encontrado en loadFromCache.`);
+        return false;
+    }
+
+    const inputs = $$(`${currentStepId} input, ${currentStepId} select, ${currentStepId} textarea`);
+    inputs.forEach(input => {
+      const fieldKey = input.id || input.name;
+      if (fieldKey && typeof window.formCache[fieldKey] !== 'undefined') {
+        if (input.type === 'checkbox') {
+          input.checked = window.formCache[fieldKey];
+        } else {
+          input.value = window.formCache[fieldKey];
+        }
+        // Disparar 'change' aquí puede causar múltiples recálculos.
+        // Es mejor que los setupPasoXEvents() se encarguen de disparar 'change'
+        // en campos clave después de asignarles valor desde el caché si es necesario.
+        // const event = new Event('change', { bubbles: true });
+        // input.dispatchEvent(event); 
+      }
+    });
+    return true;
+  } catch (e) {
+    console.error("Error cargando desde caché en loadFromCache:", e); // Modifiqué el mensaje de error para ser más específico
+    return false;
+  }
+}
+
+function loadStep(stepNumber) {
+  const targetStep = parseInt(stepNumber);
+  if (isNaN(targetStep) || targetStep < 1 || targetStep > FormState.totalSteps) {
+    console.error(`Intento de cargar paso inválido: ${stepNumber}`); return;
+  }
+
+  if (FormState.currentStep > 0 && FormState.currentStep <= FormState.totalSteps) saveToCache();
+  
+  FormState.setCurrentStep(targetStep);
+  const loadingEl = showLoadingIndicator();
+  
+  google.script.run
+    .withSuccessHandler(function(html) {
+      hideLoadingIndicator(loadingEl);
+      const stepContainer = $('#step-container');
+      if(stepContainer) stepContainer.innerHTML = html;
+      
+      updateProgressIndicators(targetStep);
+      loadFromCache(); 
+      resetValidationStateVisuals(); 
+      setupStepSpecificEvents(targetStep); // Esto ahora configurará eventos y disparará 'change' si es necesario
+      setupAutoFillDetectionForStep(); 
+      enhanceStepAccessibility(targetStep);
+      EventBus.publish('stepLoaded', { step: targetStep });
+      
+      const firstFocusable = stepContainer ? stepContainer.querySelector('h2, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])') : null;
+      if(firstFocusable) firstFocusable.focus();
+    })
+    .withFailureHandler(function(error) {
+      hideLoadingIndicator(loadingEl);
+      showNotification(`Error crítico al cargar el paso ${targetStep}: ${error.message || error}. Intente recargar.`, 'error', 10000);
+    })
+    .getStepHTML(targetStep);
+}
+
+function resetValidationStateVisuals() { 
+  $$('input, select, textarea').forEach(field => {
+    field.classList.remove('is-invalid', 'is-valid');
+    const errorElement = field.parentElement.querySelector(`.error-message#${field.id}-error`);
+    if (errorElement) {
+        errorElement.textContent = '';
+        errorElement.style.display = 'none';
+    }
+  });
+}
+
+// =====================================================================================
+// PARTE 2: VALIDACIÓN DE CAMPOS Y GESTIÓN ESPECÍFICA DE CADA PASO
+// =====================================================================================
+
+function setupValidationsListeners() {
+  const stepContainer = $('#step-container');
+  if (stepContainer) {
+    stepContainer.addEventListener('change', function(event) {
+      const target = event.target;
+      if (target.dataset && target.dataset.validation) validarCampo(target, false);
+    });
+    stepContainer.addEventListener('blur', function(event) {
+      const target = event.target;
+      if (target.dataset && target.dataset.validation) validarCampo(target, true);
+    }, true);
+  }
+}
+
+function setupGlobalWizardEvents() {
+  document.addEventListener('keyup', function(event) {
+    if (event.key === 'Enter') {
+      const activeElement = document.activeElement;
+      if (activeElement && (activeElement.tagName === 'TEXTAREA' || (activeElement.tagName === 'BUTTON' && activeElement.type !== 'submit'))) {
+        return; 
+      }
+      event.preventDefault(); 
+
+      if (FormState.currentStep === FormState.totalSteps) {
+        const btnSubmitP4 = $('#submit-form'); 
+        if (btnSubmitP4 && !btnSubmitP4.disabled) btnSubmitP4.click();
+      } else {
+        const btnNext = $('#btn-next'); 
+        if (btnNext && !btnNext.disabled) btnNext.click();
+      }
+    }
+  });
+}
+
+function setupFocusHelpTextListeners() {
+    const stepContainer = $('#step-container');
+    if (stepContainer) {
+        stepContainer.addEventListener('focusin', function(event) {
+            const field = event.target;
+            if ((field.tagName === 'INPUT' || field.tagName === 'SELECT' || field.tagName === 'TEXTAREA') && field.closest) {
+                const formGroup = field.closest('.form-group');
+                if (formGroup) {
+                    $$('.form-group.field-focused').forEach(fg => fg.classList.remove('field-focused'));
+                    formGroup.classList.add('field-focused');
+                    if (field.classList.contains('is-invalid')) formGroup.classList.add('field-has-error');
+                    else formGroup.classList.remove('field-has-error');
+                }
+            }
+        });
+        stepContainer.addEventListener('focusout', function(event) {
+            const field = event.target;
+            if ((field.tagName === 'INPUT' || field.tagName === 'SELECT' || field.tagName === 'TEXTAREA') && field.closest) {
+                const formGroup = field.closest('.form-group');
+                if (formGroup) {
+                    if (!field.classList.contains('is-invalid')) { 
+                        formGroup.classList.remove('field-focused');
+                        // La clase 'field-has-error' se actualiza en validarCampo
+                    }
+                }
+            }
+        });
+    }
+}
+
+
+function setupStepSpecificEvents(stepNumber) {
+  console.log(`Configurando eventos para el paso: ${stepNumber}`);
+  if (typeof $ !== 'function') {
+      console.error("Función $ no definida."); return;
+  }
+  
+  switch (stepNumber) {
+    case 1: setupPaso1Events(); break;
+    case 2: setupPaso2Events(); break;
+    case 3: setupPaso3Events(); break;
+    case 4: setupPaso4Events(); break;
+  }
+  updateCostos(); // Siempre actualizar costos al final de la configuración del paso
+}
+
+// --- INICIO EVENTOS PASO 1 ---
+function setupPaso1Events() {
+  console.log("Ejecutando setupPaso1Events para Paso 1");
+  const fechaNacimiento = $('#fechaNacimiento');
+  if (fechaNacimiento) {
+    let calculoTitularTimer; // Variable para el debounce
+    let calculoTitularLlamadoCount = 0; // Contador que ya teníamos para depuración
+
+    fechaNacimiento.addEventListener('change', function() {
+      calculoTitularLlamadoCount++;
+      // Log para ver cuándo se dispara el evento change original
+      console.log(`EVENTO CHANGE #${calculoTitularLlamadoCount}: Fecha Nacimiento cambió a: ${this.value}`);
+      
+      clearTimeout(calculoTitularTimer); // Limpiar temporizador anterior si existe
+
+      const fechaIngresada = this.value; // Guardar el valor actual de la fecha para usarlo en el setTimeout
+
+      calculoTitularTimer = setTimeout(() => {
+        // Log para indicar que el debounce se ha ejecutado
+        console.log(`DEBOUNCE EJECUTADO (Intento #${calculoTitularLlamadoCount}): Procesando fecha: ${fechaIngresada}`);
+        
+        const edad = calcularEdad(fechaIngresada); // Usar fechaIngresada que se capturó cuando el evento 'change' ocurrió
+        
+        // Log para ver la edad calculada
+        console.log(`PASO 1 (Intento Debounce #${calculoTitularLlamadoCount}) - Edad calculada: ${edad}`);
+        
+        window.formCache.edad = edad; // Guardar la edad en el caché
+        
+        // No es estrictamente necesario validar el campo aquí si se valida al cambiar de paso o en blur,
+        // pero si lo quieres mantener, está bien. Podrías ponerlo fuera del debounce si prefieres feedback inmediato de validación.
+        // validarCampo(this, true); // 'this' aquí dentro del setTimeout se refiere a 'window', no al input. Necesitaríamos 'fechaNacimiento'
+        validarCampo(fechaNacimiento, true); // Usar la referencia directa al elemento
+
+        if (typeof calcularCostoTitular === "function") {
+            console.log(`PASO 1 (Intento Debounce #${calculoTitularLlamadoCount}) - Llamando a calcularCostoTitular con edad: ${edad}`);
+            calcularCostoTitular(edad); 
+        }
+      }, 500); // Esperar 500ms después del último cambio antes de ejecutar el cálculo de costo
+    });
+
+    // Si hay valor en caché, rellenar el campo.
+    // La lógica de recálculo al cargar el paso basada en el caché la manejaremos de forma más centralizada
+    // o a través del flujo normal de eventos si el campo 'fechaNacimiento' ya tiene un valor y se dispara 'change'.
+    // La siguiente lógica podría ser redundante si 'loadFromCache' ya establece el valor y confiamos en que 'updateCostos'
+    // se llamará después de que el estado se restaure.
+    if (window.formCache.fechaNacimiento) { // Comprobar si hay algo en el caché para este campo
+        if (fechaNacimiento.value !== window.formCache.fechaNacimiento) { // Solo si es diferente para evitar disparos innecesarios
+             // No disparamos 'change' aquí directamente para evitar bucles o múltiples llamadas.
+             // El valor se establecerá por loadFromCache().
+             // Si al cargar el paso, el campo fechaNacimiento ya tiene un valor (del caché),
+             // y queremos que el costo se calcule/actualice, necesitaremos asegurar que calcularCostoTitular
+             // se llame DESPUÉS de que loadFromCache haya puesto el valor.
+             // Esto usualmente se maneja haciendo que loadFromCache restaure el estado Y LUEGO updateCostos() se llame.
+        }
+    }
+  }
+  // ... el resto de tu función setupPaso1Events (lógica para tipoDocumentoEl, paisNacimientoEl, etc.) ...
+  // Esta parte no la modifico ya que el debounce es solo para fechaNacimiento.
+  
+  const tipoDocumentoEl = $('#tipoDocumento');
+  const numeroDocumentoEl = $('#numeroDocumento');
+  if (tipoDocumentoEl && numeroDocumentoEl) {
+    const updateNumeroDocumentoValidation = () => {
+      const tipo = tipoDocumentoEl.value;
+      // No limpiar numeroDocumentoEl.value aquí, el usuario podría estar volviendo al paso
+      if (tipo === 'DNI') {
+        numeroDocumentoEl.setAttribute('data-validation', 'required|dni');
+        numeroDocumentoEl.dataset.validationMessage = numeroDocumentoEl.dataset.validationMessageDni || 'El DNI debe tener 8 dígitos';
+        numeroDocumentoEl.maxLength = 8; numeroDocumentoEl.inputMode = 'numeric'; numeroDocumentoEl.pattern = '\\d{8}';
+        numeroDocumentoEl.placeholder = '8 dígitos numéricos'; numeroDocumentoEl.disabled = false;
+      } else if (tipo === 'CE') {
+        numeroDocumentoEl.setAttribute('data-validation', 'required|ce');
+        numeroDocumentoEl.dataset.validationMessage = numeroDocumentoEl.dataset.validationMessageCe || 'El CE debe tener 1-12 caracteres';
+        numeroDocumentoEl.maxLength = 12; numeroDocumentoEl.removeAttribute('inputmode'); numeroDocumentoEl.removeAttribute('pattern');
+        numeroDocumentoEl.placeholder = '1 a 12 caracteres'; numeroDocumentoEl.disabled = false;
+      } else { 
+        numeroDocumentoEl.setAttribute('data-validation', 'required');
+        numeroDocumentoEl.dataset.validationMessage = 'Seleccione primero un tipo de documento';
+        numeroDocumentoEl.placeholder = 'Seleccione tipo primero'; numeroDocumentoEl.disabled = true;
+        numeroDocumentoEl.value = ''; 
+      }
+      // Revalidar el campo, pero no mostrar error a menos que ya tuviera foco (lo cual showErrors=false haría)
+      validarCampo(numeroDocumentoEl, false); 
+    };
+
+    tipoDocumentoEl.addEventListener('change', updateNumeroDocumentoValidation);
+    
+    if (window.formCache.tipoDocumento) tipoDocumentoEl.value = window.formCache.tipoDocumento;
+    updateNumeroDocumentoValidation(); 
+    if (window.formCache.numeroDocumento && !numeroDocumentoEl.disabled) {
+        numeroDocumentoEl.value = window.formCache.numeroDocumento;
+        validarCampo(numeroDocumentoEl, false); // Validar pero no forzar visualización de error
+    }
+  }
+  
+  const paisNacimientoEl = $('#paisNacimiento');
+  if (paisNacimientoEl && tipoDocumentoEl) {
+    const updateTipoDocumentoBasedOnPais = () => {
+        const pais = paisNacimientoEl.value;
+        console.log(`País de Nacimiento: ${pais}. Lógica de afectación a Tipo Documento aquí.`);
+        if (pais === 'OTRO' && tipoDocumentoEl.value === 'DNI') {
+            showNotification('Para "Otro" país, DNI podría no ser aplicable. Verifique.', 'warning', 7000);
+        }
+        // Forzar la reevaluación de la validación del número de documento
+        const event = new Event('change', { bubbles: true });
+        tipoDocumentoEl.dispatchEvent(event);
+    };
+    paisNacimientoEl.addEventListener('change', updateTipoDocumentoBasedOnPais);
+    if (window.formCache.paisNacimiento) {
+        paisNacimientoEl.value = window.formCache.paisNacimiento;
+        // Disparar para aplicar lógica si hay valor en caché
+        // setTimeout(() => updateTipoDocumentoBasedOnPais(), 0); // Pequeño delay para asegurar que tipoDocumentoEl tenga su valor de caché
+         const event = new Event('change', { bubbles: true });
+         paisNacimientoEl.dispatchEvent(event);
+    }
+  }
+  
+  ['primerNombre', 'segundoNombre', 'apellidoPaterno', 'apellidoMaterno'].forEach(id => {
+      const campo = $(`#${id}`);
+      if (campo && !campo.hasAttribute('autocomplete')) {
+          if (id === 'primerNombre') campo.setAttribute('autocomplete', 'given-name');
+          else if (id === 'segundoNombre') campo.setAttribute('autocomplete', 'additional-name');
+          else if (id.includes('apellido')) campo.setAttribute('autocomplete', 'family-name');
+      }
+      // Restaurar valor desde caché (ya lo hace loadFromCache)
+      // if (window.formCache[id]) campo.value = window.formCache[id];
+  });
+}
+// --- FIN EVENTOS PASO 1 ---
+
+// --- INICIO EVENTOS PASO 2 ---
+function setupPaso2Events() {
+  console.log("Ejecutando setupPaso2Events para Paso 2");
+  const numeroDependientesEl = $('#numeroDependientes');
+  if (numeroDependientesEl) {
+    numeroDependientesEl.addEventListener('change', function() {
+      guardarPreferenciasUsuario('numeroDependientes', this.value); // Asumiendo que guardarPreferenciasUsuario está ahora disponible globalmente
+      FormState.resetCostosDependientes(); 
+      updateCostos(); 
+    });
+    if (window.formCache.numeroDependientes) {
+        numeroDependientesEl.value = window.formCache.numeroDependientes;
+    }
+  }
+  
+  const pagoRecurrenteEl = $('#pagoRecurrente');
+  if (pagoRecurrenteEl) {
+    pagoRecurrenteEl.addEventListener('change', function() {
+      guardarPreferenciasUsuario('pagoRecurrente', this.checked);
+      validarCampo(this,true); 
+    });
+    if (typeof window.formCache.pagoRecurrente === 'boolean') {
+        pagoRecurrenteEl.checked = window.formCache.pagoRecurrente;
+    }
+    if (pagoRecurrenteEl.dataset.validation && pagoRecurrenteEl.dataset.validation.includes('required')) {
+        validarCampo(pagoRecurrenteEl, false); 
+    }
+  }
+  
+  const periodicidadPagoEl = $('#periodicidadPago');
+  if (periodicidadPagoEl) {
+    const updatePeriodicidadLogic = () => {
+        const periodicidad = periodicidadPagoEl.value;
+        guardarPreferenciasUsuario('periodicidadPago', periodicidad);
+        if (pagoRecurrenteEl) {
+            pagoRecurrenteEl.disabled = false; 
+        }
+        actualizarCostosPorPeriodicidad(periodicidad);
+    };
+    periodicidadPagoEl.addEventListener('change', updatePeriodicidadLogic);
+    
+    periodicidadPagoEl.value = "Mensual"; 
+    guardarPreferenciasUsuario('periodicidadPago', "Mensual");
+    updatePeriodicidadLogic(); 
+  }
+
+  const emailEl = $('#email');
+  if (emailEl) {
+    if (window.formCache.email) emailEl.value = window.formCache.email;
+    emailEl.setAttribute('autocomplete', 'email');
+  }
+
+  const telefonoEl = $('#telefono');
+  if (telefonoEl) {
+    if (window.formCache.telefono) telefonoEl.value = window.formCache.telefono;
+    telefonoEl.setAttribute('autocomplete', 'tel-national');
+    telefonoEl.addEventListener('input', function() {
+      this.value = this.value.replace(/\D/g, '');
+      if (this.value.length > 9) this.value = this.value.substring(0, 9);
+    });
+  }
+  
+   const whatsappCheckbox = $('#whatsapp');
+   if (whatsappCheckbox) {
+       whatsappCheckbox.addEventListener('change', function() {
+           guardarPreferenciasUsuario('whatsapp', this.checked);
+       });
+       if (typeof window.formCache.whatsapp === 'boolean') {
+           whatsappCheckbox.checked = window.formCache.whatsapp;
+       }
+   }
+
+  // ------ INICIO DE PASO D (Suscripción al EventBus) ------
+  // Asegurarse de que EventBus está definido y es accesible
+  if (typeof EventBus !== 'undefined' && EventBus.subscribe) {
+    // Guardar la función de desuscripción para poder limpiarla si es necesario
+    // (ej. al cambiar de paso, para evitar múltiples listeners si el usuario va y viene)
+    // Esto es una práctica más avanzada, por ahora solo suscribimos.
+    // window.unsubscribeCostoTitularPaso2 = EventBus.subscribe('costoTitularActualizado', function(data) {
+    EventBus.subscribe('costoTitularActualizado', function(data) {
+      // Solo actualizar la UI si el Paso 2 es el que está actualmente visible
+      if (FormState.currentStep === 2) { 
+        console.log('EVENTO RECIBIDO (Paso 2): costoTitularActualizado. Data recibida:', data);
+        
+        // Se espera que 'data' tenga una propiedad 'costo' con el nuevo costo del titular.
+        // FormState.costoTitular ya debería haber sido actualizado por la función que publicó el evento.
+        // Por lo tanto, solo necesitamos llamar a updateCostos() para que la UI refleje el cambio.
+        updateCostos();
+      }
+    });
+    console.log("Paso 2: Suscrito al evento 'costoTitularActualizado'.");
+  } else {
+    console.warn("EventBus no está disponible o no tiene el método subscribe. No se pudo suscribir para actualizaciones de costo en Paso 2.");
+  }
+  // ------ FIN DE PASO D ------
+
+  // Es buena práctica llamar a updateCostos() una vez al final de la configuración del paso,
+  // por si el estado ya estaba correcto en el caché y solo necesita reflejarse en la UI.
+  // Esto ya lo hace setupStepSpecificEvents al final.
+}
+// --- FIN EVENTOS PASO 2 ---
+
+// --- INICIO EVENTOS PASO 3 ---
+function setupPaso3Events() {
+  console.log("Ejecutando setupPaso3Events para Paso 3");
+  const numDependientes = parseInt(window.formCache.numeroDependientes || 0);
+  const mensajeNoDependientes = $('#no-dependientes'); // ID en Paso3.html
+  const dependientesContainer = $('#dependientes-container');
+
+  if (numDependientes === 0) {
+    if (mensajeNoDependientes) {
+      mensajeNoDependientes.style.display = 'block';
+      mensajeNoDependientes.setAttribute('role', 'status'); 
+      mensajeNoDependientes.setAttribute('aria-live', 'polite');
+    }
+    if (dependientesContainer) {
+      dependientesContainer.innerHTML = ''; 
+      dependientesContainer.style.display = 'none';
+    }
+    window.skipDependientesValidation = true;
+    FormState.resetCostosDependientes();
+    // updateCostos(); // Se llama al final de setupStepSpecificEvents, que a su vez llama a este.
+    return;
+  }
+  
+  window.skipDependientesValidation = false;
+  if (mensajeNoDependientes) mensajeNoDependientes.style.display = 'none';
+  if (dependientesContainer) dependientesContainer.style.display = 'block';
+
+  initializeDependientesAccordion(numDependientes);
+  // Los costos individuales de los dependientes se calcularán ahora si hay fechas en caché
+  // o cuando el usuario interactúe con las fechas.
+  // updateCostos() se llamará al final de setupStepSpecificEvents, que a su vez llama a este.
+}
+
+function initializeDependientesAccordion(numDependientes) {
+  const container = $('#dependientes-container');
+  const templateNode = $('#dependiente-template'); 
+
+  if (!container || !templateNode) {
+    console.error("Error: Contenedor o plantilla de dependientes no encontrados en Paso3.html.");
+    return;
+  }
+  container.innerHTML = ''; // Limpiar acordeones existentes antes de regenerar
+
+  // ---- INICIO DE LOG PARA VER CACHÉ AL ENTRAR AL PASO 3 ----
+  console.log('INITIALIZE_DEPENDIENTES_ACCORDION: Estado de window.formCache al iniciar construcción de acordeones:', JSON.parse(JSON.stringify(window.formCache || {})));
+  // ---- FIN DE LOG ----
+
+  for (let i = 1; i <= numDependientes; i++) { // 'i' es el índice UI (1-based)
+    const clone = templateNode.cloneNode(true);
+    clone.id = `dependiente-item-${i}`;
+    clone.style.display = 'block';
+
+    const suffix = `-${i}`;
+    const arrayIndex = i - 1; // Para el caché y names de formulario (0-based)
+
+    // ---- INICIO DE LOG PARA DATOS DEL DEPENDIENTE DESDE CACHÉ (antes de asignar) ----
+    console.log(`INITIALIZE_DEPENDIENTES_ACCORDION: Preparando para cargar datos para Dependiente UI ${i} (sufijo de ID esperado: ${suffix}) desde caché.`);
+    // ---- FIN DE LOG ----
+
+    // Actualizar IDs, names y MUY IMPORTANTE: restaurar valores desde el caché en la plantilla clonada
+    clone.querySelectorAll('[id$="-0"]').forEach(el => {
+      const originalIdBase = el.id.replace('-0', ''); // ej. 'primerNombre'
+      const newId = originalIdBase + suffix; // ej. 'primerNombre-1'
+      el.id = newId;
+
+      if (el.name && el.name.includes('[0]')) {
+        el.name = el.name.replace('[0]', `[${arrayIndex}]`);
+      }
+
+      // ---- INICIO DE LÓGICA EXPLÍCITA PARA RESTAURAR VALOR DESDE CACHÉ ----
+      if (typeof window.formCache !== 'undefined' && typeof window.formCache[newId] !== 'undefined') {
+        if (el.type === 'checkbox') {
+          el.checked = window.formCache[newId];
+          console.log(`  CACHE_LOAD (Dep UI ${i}): Campo ${newId} (checkbox) restaurado a: ${el.checked}`);
+        } else {
+          el.value = window.formCache[newId];
+          console.log(`  CACHE_LOAD (Dep UI ${i}): Campo ${newId} restaurado a: "${el.value}"`);
+        }
+      } else {
+        console.log(`  CACHE_LOAD (Dep UI ${i}): No se encontró valor en caché para ${newId}. El campo usará su valor por defecto o estará vacío.`);
+        // Si no hay valor en caché y el campo es un input de texto/fecha/etc. (no checkbox/radio)
+        // y no tiene ya un valor por defecto en la plantilla HTML, podrías querer limpiarlo.
+        // Esta lógica asegura que si el campo está en la plantilla pero no en el caché, no mantenga datos de la plantilla 'modelo'.
+        if (el.tagName === 'INPUT' && el.type !== 'checkbox' && el.type !== 'radio' && !el.defaultValue && !el.value) {
+           // el.value = ''; // Descomentar esta línea si deseas que los campos se limpien activamente si no hay valor en caché.
+                            // Por ahora, se prefiere que si no hay nada en caché, el campo quede como lo define la plantilla (que podría estar ya vacía o con un placeholder).
+        }
+      }
+      // ---- FIN DE LÓGICA EXPLÍCITA PARA RESTAURAR VALOR DESDE CACHÉ ----
+
+      if (el.classList.contains('error-message')) {
+        const inputId = el.id.replace('-error', '');
+        const correspondingInput = clone.querySelector(`#${inputId}`);
+        if(correspondingInput) correspondingInput.setAttribute('aria-describedby', el.id);
+      }
+      if (el.classList.contains('costo-dependiente-valor')) {
+        el.dataset.dependienteIndex = i;
+      }
+    });
+    
+    clone.querySelectorAll('label[for$="-0"]').forEach(label => {
+        label.setAttribute('for', label.getAttribute('for').replace('-0', suffix));
+    });
+
+    const header = clone.querySelector('.acordeon-header');
+    const content = clone.querySelector('.acordeon-content');
+    const numSpan = header.querySelector('.dependiente-num');
+    if (numSpan) numSpan.textContent = i;
+    
+    header.setAttribute('aria-controls', `acordeon-content${suffix}`);
+    content.id = `acordeon-content${suffix}`;
+    const iconExpand = header.querySelector('.icon-expand');
+    const iconCollapse = header.querySelector('.icon-collapse');
+    
+    let isInitiallyExpanded = (i === 1); 
+    content.style.display = isInitiallyExpanded ? 'block' : 'none';
+    header.setAttribute('aria-expanded', isInitiallyExpanded.toString());
+    content.setAttribute('aria-hidden', (!isInitiallyExpanded).toString());
+    if(iconExpand) iconExpand.style.display = isInitiallyExpanded ? 'none' : 'inline';
+    if(iconCollapse) iconCollapse.style.display = isInitiallyExpanded ? 'inline' : 'none';
+
+    header.addEventListener('click', function() {
+      const isExpandedNow = content.style.display === 'block';
+      content.style.display = isExpandedNow ? 'none' : 'block';
+      this.setAttribute('aria-expanded', !isExpandedNow);
+      content.setAttribute('aria-hidden', isExpandedNow);
+      if(iconExpand) iconExpand.style.display = isExpandedNow ? 'inline' : 'none';
+      if(iconCollapse) iconCollapse.style.display = isExpandedNow ? 'none' : 'inline';
+    });
+
+    // Lógica de DEBOUNCE para fechaNacimientoDep
+    const fechaNacimientoDep = clone.querySelector(`#fechaNacimiento${suffix}`);
+    if (fechaNacimientoDep) {
+      const fieldId = fechaNacimientoDep.id;
+      fechaNacimientoDep.addEventListener('change', function() {
+        const depIndexUI = i;
+        const depArrayIndexCache = arrayIndex; 
+        const fechaIngresada = this.value;
+        console.log(`DEP ${depIndexUI} (UI Index) - Evento 'change' en Fecha Nac. (ID: ${fieldId}). Valor ingresado: ${fechaIngresada}`);
+        clearTimeout(fieldDebounceTimers[fieldId]);
+        fieldDebounceTimers[fieldId] = setTimeout(() => {
+          const edadCalculada = calcularEdad(fechaIngresada);
+          console.log(`DEP ${depIndexUI} (UI Index) - DEBOUNCE para ${fieldId} ejecutado. Fecha procesada: ${fechaIngresada}, Edad calculada FRONTEND: ${edadCalculada}`);
+          if (window.formCache && typeof window.formCache === 'object') {
+            window.formCache[`dep${depArrayIndexCache}_edad`] = edadCalculada; 
+          }
+          validarCampo(fechaNacimientoDep, true); 
+          calcularCostoDependiente(depIndexUI, edadCalculada);
+          delete fieldDebounceTimers[fieldId];
+        }, 750);
+      });
+
+      // Si el campo ya tiene un valor (del caché, asignado al inicio del bucle por la nueva lógica de restauración),
+      // disparar cálculo inicial del costo si la fecha es válida.
+      if (fechaNacimientoDep.value) { 
+           const edadCache = calcularEdad(fechaNacimientoDep.value);
+           console.log(`DEP ${i} (UI Index) - Fecha ya en campo (caché es "${fechaNacimientoDep.value}"), Edad para cálculo inicial de costo: ${edadCache}. Disparando cálculo.`);
+           if (edadCache >= 0) { 
+                calcularCostoDependiente(i, edadCache);
+           }
+      }
+    }
+    
+    // Lógica para tipoDocumentoDep y numeroDocumentoDep
+    const tipoDocumentoDep = clone.querySelector(`#tipoDocumento${suffix}`);
+    const numeroDocumentoDep = clone.querySelector(`#numeroDocumento${suffix}`);
+    if (tipoDocumentoDep && numeroDocumentoDep) {
+        const updateDepDocValidation = () => {
+            const tipo = tipoDocumentoDep.value;
+            if (tipo === 'DNI') {
+                numeroDocumentoDep.setAttribute('data-validation', 'required|dni');
+                numeroDocumentoDep.dataset.validationMessage = numeroDocumentoDep.dataset.validationMessageDni || 'El DNI debe tener 8 dígitos numéricos';
+                numeroDocumentoDep.maxLength = 8; numeroDocumentoDep.inputMode = 'numeric'; numeroDocumentoDep.pattern = '\\d{8}';
+                numeroDocumentoDep.placeholder = '8 dígitos'; numeroDocumentoDep.disabled = false;
+            } else if (tipo === 'CE') {
+                numeroDocumentoDep.setAttribute('data-validation', 'required|ce');
+                numeroDocumentoDep.dataset.validationMessage = numeroDocumentoDep.dataset.validationMessageCe || 'El CE debe tener entre 1 y 12 caracteres alfanuméricos';
+                numeroDocumentoDep.maxLength = 12; numeroDocumentoDep.removeAttribute('inputmode'); numeroDocumentoDep.removeAttribute('pattern');
+                numeroDocumentoDep.placeholder = '1 a 12 caracteres'; numeroDocumentoDep.disabled = false;
+            } else { 
+                numeroDocumentoDep.setAttribute('data-validation', 'required');
+                numeroDocumentoDep.dataset.validationMessage = 'Seleccione primero un tipo de documento';
+                numeroDocumentoDep.placeholder = 'Seleccione tipo primero'; numeroDocumentoDep.disabled = true;
+                if (tipo === '') { 
+                    numeroDocumentoDep.value = ''; 
+                }
+            }
+            validarCampo(numeroDocumentoDep, false);
+        };
+        tipoDocumentoDep.addEventListener('change', updateDepDocValidation);
+        // Ejecutar una vez para el estado inicial (basado en valor del caché para tipoDocumentoDep, que fue asignado más arriba)
+        updateDepDocValidation(); 
+    }
+    
+    container.appendChild(clone);
+  } // Fin del bucle for
+}
+// --- FIN EVENTOS PASO 3 ---
+
+// --- INICIO EVENTOS PASO 4 (MODIFICADO CON LOGS Y AJUSTE A BOTÓN VERDE) ---
+function setupPaso4Events() {
+  console.log("Ejecutando setupPaso4Events para Paso 4");
+  updateResumen(); // Carga el resumen con los datos actuales del caché
+  setupDeclaracionesLinks(); 
+
+  // --- INICIO: Asegurar limpieza del form-error-message ---
+  const formErrorMsgP4 = $('#form-error-message');
+  if (formErrorMsgP4) {
+    formErrorMsgP4.textContent = '';
+    formErrorMsgP4.style.display = 'none';
+  }
+  // --- FIN: Asegurar limpieza del form-error-message ---
+
+  // Cambiamos la referencia al botón que queremos controlar: el verde general.
+  const btnSubmitVerde = $('#btn-submit'); 
+
+  if (btnSubmitVerde) { // Comprobamos que el botón verde (#btn-submit) exista
+    const checkAndSetSubmitButtonState = () => {
+        const allRequiredChecked = $$('#step-4 input[type="checkbox"][data-validation*="required"]')
+                                .every(cb => cb.checked);
+        
+        // --- LOG SUGERIDO 2 (DENTRO DE checkAndSetSubmitButtonState) ---
+        console.log("PASO 4 - Dentro de checkAndSetSubmitButtonState: allRequiredChecked es:", allRequiredChecked, "Botón verde (#btn-submit) se pondrá disabled:", !allRequiredChecked);
+        // --- FIN LOG SUGERIDO 2 ---
+        
+        btnSubmitVerde.disabled = !allRequiredChecked; // Afecta al botón verde
+    };
+
+    $$('#step-4 input[type="checkbox"][data-validation*="required"]').forEach(checkbox => {
+      checkbox.addEventListener('change', () => {
+        guardarPreferenciasUsuario(checkbox.id, checkbox.checked);
+        checkAndSetSubmitButtonState(); // Llama a la función que afecta al botón verde
+        validarCampo(checkbox, true);
+      });
+      if (typeof window.formCache[checkbox.id] === 'boolean') {
+          checkbox.checked = window.formCache[checkbox.id];
+      }
+      validarCampo(checkbox, false); 
+    });
+    
+    checkAndSetSubmitButtonState(); // Establece el estado inicial del botón verde
+
+    // --- LOG SUGERIDO 1 (DESPUÉS de la primera llamada a checkAndSetSubmitButtonState) ---
+    console.log("PASO 4 - Estado inicial del botón verde (#btn-submit) al final de su configuración en setupPaso4Events. Deshabilitado:", btnSubmitVerde.disabled);
+    // --- FIN LOG SUGERIDO 1 ---
+
+    // El addEventListener para el clic del btnSubmitP4 (rojo) se elimina,
+    // porque ese botón está comentado en Paso4.html y la lógica de envío
+    // ahora está en setupNavigation() para el botón #btn-submit (verde).
+
+  } else {
+    // Este mensaje ahora se refiere al botón verde.
+    console.warn("El botón #btn-submit (general verde) no fue encontrado por setupPaso4Events, pero es el esperado para controlar el estado de envío.");
+  }
+}
+// --- FIN EVENTOS PASO 4 ---
+
+// =====================================================================================
+// PARTE 3: PROCESAMIENTO, ENVÍO, FUNCIONES DE COSTOS Y AUXILIARES
+// =====================================================================================
+
+function showLoadingIndicator() {
+  let indicator = $('#loading-indicator-global');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.id = 'loading-indicator-global';
+    indicator.className = 'loading-indicator global-loading';
+    indicator.setAttribute('aria-live', 'assertive'); indicator.setAttribute('role', 'status');
+    indicator.innerHTML = `<div class="spinner"></div><div class="loading-text">Cargando...</div>`;
+    document.body.appendChild(indicator);
+  }
+  indicator.style.display = 'flex';
+  return indicator;
+}
+
+function hideLoadingIndicator(indicatorInstance) {
+  if (indicatorInstance && indicatorInstance.parentNode) {
+    indicatorInstance.style.display = 'none';
+  } else {
+    const globalIndicator = $('#loading-indicator-global');
+    if (globalIndicator) globalIndicator.style.display = 'none';
+  }
+}
+
+function updateProgressIndicators(stepNumber) {
+  const progressIndicator = $('#progress-indicator');
+  if (progressIndicator) {
+    const progressPercentage = Math.max(0, Math.min(100, (stepNumber / FormState.totalSteps) * 100));
+    progressIndicator.style.width = `${progressPercentage}%`;
+    progressIndicator.setAttribute('aria-valuenow', stepNumber);
+    progressIndicator.setAttribute('aria-valuemax', FormState.totalSteps.toString());
+  }
+
+  $$('.step-indicator').forEach(indicator => {
+    indicator.classList.remove('active', 'completed');
+    const step = parseInt(indicator.dataset.step);
+    if (step < stepNumber) {
+      indicator.classList.add('completed');
+      indicator.removeAttribute('aria-current');
+    } else if (step === stepNumber) {
+      indicator.classList.add('active');
+      indicator.setAttribute('aria-current', 'step');
+    } else {
+      indicator.removeAttribute('aria-current');
+    }
+  });
+
+  const btnBack = $('#btn-back');
+  const btnNext = $('#btn-next');
+  const btnSubmitGeneral = $('#btn-submit'); // Botón general de Formulario.html
+
+  if (btnBack) {
+    btnBack.style.display = (stepNumber === 1) ? 'none' : 'inline-block';
+    btnBack.disabled = false;
+  }
+  if (btnNext) {
+    btnNext.style.display = (stepNumber === FormState.totalSteps) ? 'none' : 'inline-block';
+    btnNext.disabled = false;
+  }
+  
+  // Mostrar el botón de submit general (verde, #btn-submit) ÚNICAMENTE en el Paso 4.
+  // Ocultarlo en todos los demás pasos.
+  if (btnSubmitGeneral) {
+    if (stepNumber === FormState.totalSteps) { // FormState.totalSteps es 4
+      btnSubmitGeneral.style.display = 'inline-block'; // Mostrar en el Paso 4
+      btnSubmitGeneral.disabled = false; // Asegurarse de que esté habilitado si se muestra
+    } else {
+      btnSubmitGeneral.style.display = 'none'; // Ocultar en otros pasos
+    }
+  }
+}
+
+function setupNavigation() {
+  const btnNext = $('#btn-next');
+  if (btnNext) {
+    btnNext.addEventListener('click', function() {
+      if (this.disabled) return;
+      if (validarPaso(FormState.currentStep)) {
+        if (FormState.currentStep < FormState.totalSteps) {
+          loadStep(FormState.currentStep + 1);
+        }
+      }
+    });
+  }
+  
+  const btnBack = $('#btn-back');
+  if (btnBack) {
+    btnBack.addEventListener('click', function() {
+      if (this.disabled) return;
+      if (FormState.currentStep > 1) {
+        loadStep(FormState.currentStep - 1);
+      }
+    });
+  }
+
+  const btnGeneralSubmit = $('#btn-submit'); 
+  if (btnGeneralSubmit) {
+    btnGeneralSubmit.addEventListener('click', function() {
+      if (this.disabled) return;
+
+      // Si estamos en el Paso 4, este botón AHORA SÍ es el que debe iniciar el envío.
+      if (FormState.currentStep === FormState.totalSteps) {
+        console.log("Clic en btn-submit (general) en Paso 4. Iniciando validación y proceso de envío.");
+        
+        // Primero, validar el Paso 4 (declaraciones)
+        if (!validarPaso(FormState.currentStep)) {
+          // validarPaso ya muestra notificaciones de error si es necesario.
+          // Y enfoca el primer campo inválido.
+          return; 
+        }
+
+        // Si la validación del paso es exitosa, proceder con la lógica de envío.
+        // Esta lógica es similar a la que estaba en el addEventListener de #submit-form en setupPaso4Events
+        const formData = getFormDataFromCache(); // getFormDataFromCache ya llama a updateCostos
+        const loadingSpinner = $('#processing-indicator'); 
+        const errorMessageDiv = $('#form-error-message'); // El div de error del Paso 4
+        const esteBoton = this; // Referencia al botón verde
+
+        if(loadingSpinner) loadingSpinner.style.display = 'flex';
+        if(errorMessageDiv) { errorMessageDiv.textContent = ''; errorMessageDiv.style.display = 'none';}
+        esteBoton.disabled = true;
+
+        // Llamar directamente a submitFormData
+        submitFormData(formData)
+          .then(result => {
+            if(loadingSpinner) loadingSpinner.style.display = 'none';
+            // El resto del manejo de 'result' (éxito, redirección, error) está dentro de submitFormData
+            // y ya no necesitamos replicarlo aquí si submitFormData lo maneja bien.
+            // No es necesario volver a habilitar 'esteBoton' aquí si el flujo es exitoso y redirige
+            // o muestra una página de confirmación. Se habilitará si hay un error manejado en submitFormData.
+            if (!result || !result.success) { // Si hubo un error reportado por submitFormData
+                 esteBoton.disabled = false; // Volver a habilitar el botón en caso de error
+            }
+          })
+          .catch(error => {
+            if(loadingSpinner) loadingSpinner.style.display = 'none';
+            esteBoton.disabled = false;
+            const errorMsg = `Error en el envío (catch en setupNavigation): ${error.message || error}`;
+            if(errorMessageDiv) {
+                errorMessageDiv.textContent = errorMsg;
+                errorMessageDiv.style.display = 'block';
+            }
+            showNotification(errorMsg, 'error', 8000);
+          });
+      }
+      // Si no es el Paso 4, este botón no debería hacer nada ya que está oculto por updateProgressIndicators.
+      // Pero por si acaso, dejamos la lógica que no hace nada si no es el Paso 4.
+    });
+  }
+}
+
+// --- FUNCIONES DE COSTOS (AQUÍ ESTARÁN LAS ÚNICAS DEFINICIONES) ---
+function calcularCostoTitular(edad) {
+  console.log('FUNCIÓN calcularCostoTitular llamada con edad:', edad);
+
+  if (isNaN(edad) || edad < 0) {
+    console.warn("Edad inválida para cálculo de tarifa titular:", edad);
+    FormState.setCostoTitular(0);
+    window.formCache.fs_costoTitular = 0;
+    try {
+      sessionStorage.setItem('formCacheASISPLUS', JSON.stringify(window.formCache));
+      console.log('PASO 1 - Cache (con fs_costoTitular: 0 por edad inválida) guardado en sessionStorage.');
+    } catch (e) {
+      console.error("Error guardando cache en sessionStorage por edad inválida:", e);
+    }
+    updateCostos();
+    EventBus.publish('costoTitularActualizado', { costo: 0 });
+    return;
+  }
+
+  // ---- INICIO LÓGICA DE VERIFICACIÓN DE RELEVANCIA ----
+  const currentRequestId = Date.now() + Math.random();
+  lastCostRequestIdForTitular = currentRequestId; // Asegúrate que 'lastCostRequestIdForTitular' esté declarada globalmente (ej. let lastCostRequestIdForTitular = null;)
+  // ---- FIN LÓGICA DE VERIFICACIÓN DE RELEVANCIA ----
+
+  console.log(`PASO 1 - Llamando a calcularCostoTitular con edad: ${edad} (Request ID: ${currentRequestId})`);
+  
+  google.script.run
+.withSuccessHandler(function(resultadoBackend) {
+      // ---- VERIFICACIÓN DE RELEVANCIA DE LA RESPUESTA ----
+      if (lastCostRequestIdForTitular !== currentRequestId) {
+        console.log(`TITULAR - Respuesta obsoleta ignorada para EDAD ${edad} (Request ID: ${currentRequestId}, Último ID guardado: ${lastCostRequestIdForTitular})`);
+        return; 
+      }
+      // ---- FIN VERIFICACIÓN DE RELEVANCIA ----
+
+      console.log('PASO 1 - Callback de Éxito para calcularCostoTitular. Resultado del Backend:', JSON.stringify(resultadoBackend)); 
+      
+      let costoTitularCalculado = 0; // Renombrado de 'costo' para claridad
+
+      // MODIFICACIÓN: Ahora esperamos un objeto con oncosalud y asisplus
+      if (resultadoBackend && typeof resultadoBackend.asisplus !== 'undefined' && typeof resultadoBackend.oncosalud !== 'undefined') {
+        const tarifaAsisplus = parseFloat(resultadoBackend.asisplus);
+        const tarifaOncosalud = parseFloat(resultadoBackend.oncosalud); // La leemos aunque no la usemos directamente para FormState.costoTitular
+
+        if (!isNaN(tarifaAsisplus) && !isNaN(tarifaOncosalud)) { // Verificar que ambas sean números
+          // AQUÍ DECIDIMOS QUÉ ES EL "costoTitular" para FormState.
+          // Opción 1 (Asumida): FormState.costoTitular es la tarifa "Asisplus" de la hoja COSTOS.
+          costoTitularCalculado = tarifaAsisplus;
+          // Opción 2: Si FormState.costoTitular debe ser la SUMA de Oncosalud + Asisplus:
+          // costoTitularCalculado = tarifaOncosalud + tarifaAsisplus; 
+          console.log('PASO 1 - Tarifas parseadas para titular: Oncosalud=' + tarifaOncosalud + ', Asisplus=' + tarifaAsisplus + '. Costo para FormState: ' + costoTitularCalculado);
+        } else {
+          console.error("Error: resultadoBackend.asisplus o .oncosalud no son números parseables:", resultadoBackend);
+          showNotification('Hubo un problema al procesar las tarifas (numéricas) recibidas para el titular.', 'warning');
+          // costoTitularCalculado permanece 0
+        }
+      } else {
+        showNotification('No se pudo obtener la estructura de tarifa esperada (oncosalud/asisplus) para el titular desde el backend.', 'error');
+        console.error("Respuesta de estructura de tarifa (oncosalud/asisplus) inválida o faltante (titular):", resultadoBackend);
+        // costoTitularCalculado permanece 0
+      }
+      
+      // Solo actualiza el estado si la respuesta es relevante (ya verificado arriba)
+      FormState.setCostoTitular(costoTitularCalculado);
+      // window.formCache.costoTitularAsisplus = costoTitularCalculado; // Puedes mantener esto si lo usas en otro lado
+      window.formCache.fs_costoTitular = costoTitularCalculado; // Esta es la clave principal para el caché
+
+      try {
+        sessionStorage.setItem('formCacheASISPLUS', JSON.stringify(window.formCache));
+        console.log('PASO 1 - Cache (con fs_costoTitular:', window.formCache.fs_costoTitular, ') guardado en sessionStorage DESPUÉS de calcular costo titular (nueva estructura).');
+      } catch (e) {
+        console.error("Error guardando cache en sessionStorage (Paso 1, nueva estructura):", e);
+      }
+
+      console.log('PASO 1 - Calculado Costo Titular (FormState):', FormState.costoTitular, '; Guardado en Cache (fs_costoTitular):', window.formCache.fs_costoTitular);
+      updateCostos(); 
+      EventBus.publish('costoTitularActualizado', { costo: FormState.costoTitular });
+    })
+
+    .withFailureHandler(function(error) {
+      if (lastCostRequestIdForTitular !== currentRequestId) {
+        console.log(`TITULAR - Error obsoleto ignorado para EDAD ${edad} (Request ID: ${currentRequestId}, Último ID guardado: ${lastCostRequestIdForTitular})`);
+        return; 
+      }
+      showNotification(`Error al calcular tarifa del titular: ${error.message || error}`, 'error');
+      FormState.setCostoTitular(0); // Si hay un error relevante, poner costo a 0
+      window.formCache.fs_costoTitular = 0; 
+      try {
+        sessionStorage.setItem('formCacheASISPLUS', JSON.stringify(window.formCache));
+        console.log('PASO 1 - Cache (con fs_costoTitular: 0 por error relevante) guardado en sessionStorage tras FALLO.');
+      } catch (e) {
+        console.error("Error guardando cache en sessionStorage tras FALLO (Paso C):", e);
+      }
+      updateCostos();
+      console.error("Error obteniendo tarifa (titular, Request ID: " + currentRequestId + ") desde el backend:", error);
+      EventBus.publish('costoTitularActualizado', { costo: 0 });
+    })
+    .obtenerTarifasPorEdad(edad);
+} // <--- ESTA es la única llave de cierre para la función calcularCostoTitular
+
+
+
+// REEMPLAZA TU FUNCIÓN calcularCostoDependiente ACTUAL CON ESTA NUEVA VERSIÓN:
+function calcularCostoDependiente(depUiIndex, edad) {
+  const index = parseInt(depUiIndex);
+  console.log(`DEP ${index} (UI Index) - FNC calcularCostoDependiente INVOCADA con EDAD: ${edad}`);
+
+  const initialDepItemAccordion = $(`#dependiente-item-${index}`);
+  if (initialDepItemAccordion) {
+    const initialCostoDisplayEl = initialDepItemAccordion.querySelector(`.costo-dependiente-valor`);
+    if (initialCostoDisplayEl) {
+      initialCostoDisplayEl.innerHTML = '<span class="calculating">Calculando...</span>';
+    }
+  }
+
+  if (isNaN(edad) || edad < 0) {
+    console.warn(`Edad inválida (${edad}) para dependiente ${index}. Costo será 0.`);
+    FormState.setCostoDependiente(index, 0);
+    
+    if (initialDepItemAccordion) {
+      const costoDisplayElError = initialDepItemAccordion.querySelector(`.costo-dependiente-valor`);
+      if (costoDisplayElError) {
+        console.log(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - Edad inválida. Actualizando DOM a S/ 0.00.`);
+        costoDisplayElError.textContent = formatCurrency(0);
+      }
+    }
+    updateCostos();
+    return;
+  }
+
+  const currentRequestId = Date.now() + Math.random();
+  lastCostRequestIdForDependent[index] = currentRequestId;
+
+  console.log(`DEP ${index} - Llamando backend obtenerTarifasPorEdad con EDAD: ${edad} (Request ID: ${currentRequestId})`);
+
+  google.script.run
+    .withSuccessHandler(function(resultadoBackend) {
+      const currentDepItemAccordion = $(`#dependiente-item-${index}`); 
+
+      if (lastCostRequestIdForDependent[index] !== currentRequestId) {
+        console.log(`DEP ${index} - Respuesta obsoleta ignorada para EDAD ${edad} (Request ID: ${currentRequestId}, Último ID guardado: ${lastCostRequestIdForDependent[index]})`);
+        return;
+      }
+
+      let costoDependienteCalculado = 0; // Renombrado de 'costo' para claridad
+
+      // MODIFICACIÓN: Ahora esperamos un objeto con oncosalud y asisplus
+      if (resultadoBackend && typeof resultadoBackend.asisplus !== 'undefined' && typeof resultadoBackend.oncosalud !== 'undefined') {
+        const tarifaAsisplusDep = parseFloat(resultadoBackend.asisplus);
+        const tarifaOncosaludDep = parseFloat(resultadoBackend.oncosalud); // La leemos
+
+        if (!isNaN(tarifaAsisplusDep) && !isNaN(tarifaOncosaludDep)) { // Verificar que ambas sean números
+          // AQUÍ DECIDIMOS QUÉ ES EL "costo del dependiente" para FormState.dependientesCostos.
+          // Opción 1 (Asumida): Es la tarifa "Asisplus" de la hoja COSTOS para ese dependiente.
+          costoDependienteCalculado = tarifaAsisplusDep;
+          // Opción 2: Si el costo del dependiente debe ser la SUMA de Oncosalud + Asisplus:
+          // costoDependienteCalculado = tarifaOncosaludDep + tarifaAsisplusDep;
+          console.log(`DEP ${index} - Tarifas parseadas para dependiente: Oncosalud=${tarifaOncosaludDep}, Asisplus=${tarifaAsisplusDep}. Costo para FormState: ${costoDependienteCalculado}`);
+        } else {
+          console.error(`Error: resultadoBackend.asisplus o .oncosalud para dependiente ${index} no son números parseables:`, resultadoBackend);
+          showNotification(`Hubo un problema al procesar las tarifas (numéricas) para el dependiente ${index}.`, 'warning');
+          // costoDependienteCalculado permanece 0
+        }
+      } else {
+        showNotification(`No se pudo obtener la estructura de tarifa esperada (oncosalud/asisplus) para dependiente ${index}.`, 'error');
+        console.error(`Respuesta de estructura de tarifa (oncosalud/asisplus) inválida o faltante (dep ${index}):`, resultadoBackend);
+        // costoDependienteCalculado permanece 0
+      }
+      
+      console.log(`DEP ${index} - Backend devolvió para EDAD ${edad} (Request ID: ${currentRequestId}): ${JSON.stringify(resultadoBackend)}. Costo parseado para FormState: ${costoDependienteCalculado}`);
+      
+      FormState.setCostoDependiente(index, costoDependienteCalculado);
+      
+      // No es necesario guardar en window.formCache[`dep${index - 1}_costoAsisplus`] aquí,
+      // ya que FormState.dependientesCostos se guarda en saveToCache como fs_dependientesCostos.
+
+      if (currentDepItemAccordion) { 
+        const costoDisplayEl = currentDepItemAccordion.querySelector(`.costo-dependiente-valor`);
+        if (costoDisplayEl) {
+            console.log(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - ANTES de actualizar DOM. Costo a mostrar: ${costoDependienteCalculado}, Formateado: ${formatCurrency(costoDependienteCalculado)}`);
+            costoDisplayEl.textContent = formatCurrency(costoDependienteCalculado);
+            console.log(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - DESPUÉS de actualizar DOM. Contenido ahora: ${costoDisplayEl.textContent}`);
+        } else {
+            console.warn(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - Elemento .costo-dependiente-valor NO ENCONTRADO en success handler.`);
+        }
+      } else {
+          console.warn(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - Elemento #dependiente-item-${index} NO ENCONTRADO en success handler.`);
+      }
+      
+      updateCostos();
+      EventBus.publish('costoDependienteActualizado', { index: index, edad: edad, costo: costoDependienteCalculado, requestId: currentRequestId });
+    })
+    .withFailureHandler(function(error) {
+      const currentDepItemAccordion = $(`#dependiente-item-${index}`); 
+
+      if (lastCostRequestIdForDependent[index] !== currentRequestId) {
+        console.log(`DEP ${index} - Error obsoleto ignorado para EDAD ${edad} (Request ID: ${currentRequestId}, Último ID guardado: ${lastCostRequestIdForDependent[index]})`); 
+        return; 
+      }
+      console.error(`Error obteniendo tarifas (dep ${index}, Request ID: ${currentRequestId}):`, error); // Cambié el mensaje para ser más genérico
+      showNotification(`Error calculando tarifa para dependiente ${index}: ${error.message || error}`, 'error');
+      FormState.setCostoDependiente(index, 0);
+      
+      if (currentDepItemAccordion) { 
+        const costoDisplayEl = currentDepItemAccordion.querySelector(`.costo-dependiente-valor`);
+        if (costoDisplayEl) {
+          console.log(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - ERROR en backend. Actualizando DOM a S/ 0.00.`);
+          costoDisplayEl.textContent = formatCurrency(0);
+        } else {
+            console.warn(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - Elemento .costo-dependiente-valor NO ENCONTRADO en failure handler.`);
+        }
+      } else {
+          console.warn(`ASISPLUS_DEBUG | calcularCostoDependiente (Dep UI #${index}) - Elemento #dependiente-item-${index} NO ENCONTRADO en failure handler.`);
+      }
+      updateCostos();
+    })
+    .obtenerTarifasPorEdad(edad);
+}
+// FIN DEL REEMPLAZO
+
+// REEMPLAZA TU FUNCIÓN updateCostos ACTUAL CON ESTA:
+function updateCostos() {
+  const periodicidad = (window.formCache.periodicidadPago || 'Mensual').toLowerCase();
+  const costoTitularBase = FormState.costoTitular || 0;
+  const costoDependientesBase = FormState.costoDependientes || 0; 
+  
+  const factor = 1; 
+  const descuento = 1; 
+  let esAnual = false;
+  let notaDescuento = '';
+  
+  // Lógica de cálculo de costos (esta parte la tienes igual, solo está comentada la parte anual)
+  // if (periodicidad === 'anual') {
+  //   factor = 12;
+  //   descuento = 0.95; // 5% descuento
+  //   esAnual = true;
+  //   notaDescuento = 'Se ha aplicado un 5% de descuento por pago anual.';
+  // } else { // Mensual
+  //   factor = 1;
+  //   descuento = 1;
+  //   esAnual = false;
+  //   notaDescuento = '';
+  // }
+  
+  const costoTitularFinal = costoTitularBase * factor * descuento;
+  const costoDependientesFinal = costoDependientesBase * factor * descuento;
+  const costoTotalFinal = costoTitularFinal + costoDependientesFinal;
+
+  // --- Actualizar UI del Resumen de Costos en Paso 2 ---
+  const elCostoTitularP2 = $('#step-2 #costoTitular');
+  if(elCostoTitularP2) elCostoTitularP2.textContent = formatCurrency(costoTitularFinal);
+  
+  const elCostoDepsContainerP2 = $('#step-2 #costoDependientesContainer');
+  const elCostoDepsP2 = $('#step-2 #costoDependientes');
+  if(elCostoDepsContainerP2 && elCostoDepsP2){
+    elCostoDepsContainerP2.style.display = costoDependientesBase > 0 ? 'flex' : 'none';
+    elCostoDepsP2.textContent = formatCurrency(costoDependientesFinal);
+  }
+  
+  const elCostoTotalP2 = $('#step-2 #costoTotal');
+  if(elCostoTotalP2) elCostoTotalP2.textContent = formatCurrency(costoTotalFinal);
+  
+  const elPeriodicidadResumenP2 = $('#step-2 #periodicidadResumenTexto'); // Este actualiza el "(Mensual)" dentro del Total
+  if (elPeriodicidadResumenP2) elPeriodicidadResumenP2.textContent = periodicidad.charAt(0).toUpperCase() + periodicidad.slice(1);
+
+  // === LÍNEA AÑADIDA/ACTUALIZADA ===
+  const elPeriodicidadResumenTextoP2_NuevaLinea = $('#step-2 #periodicidadResumenTextoP2'); // Para la nueva línea "Periodicidad: Mensual"
+  if (elPeriodicidadResumenTextoP2_NuevaLinea) elPeriodicidadResumenTextoP2_NuevaLinea.textContent = periodicidad.charAt(0).toUpperCase() + periodicidad.slice(1);
+  // === FIN LÍNEA AÑADIDA/ACTUALIZADA ===
+
+  const elDescuentoAnualP2 = $('#step-2 #descuentoAnual');
+  if(elDescuentoAnualP2) {
+    elDescuentoAnualP2.textContent = notaDescuento;
+    elDescuentoAnualP2.style.display = esAnual ? 'block' : 'none';
+  }
+
+  // --- Actualizar UI del Resumen de Costos en Paso 3 (Panel Lateral) ---
+  const panelCostoTitularP3 = $('#step-3 #costoTitularPaso3');
+  if(panelCostoTitularP3) panelCostoTitularP3.textContent = formatCurrency(costoTitularFinal);
+  
+  const panelCostoDepsContainerP3 = $('#step-3 #costoDependientesContainerPaso3');
+  const panelCostoDepsP3 = $('#step-3 #costoDependientesPaso3');
+  if(panelCostoDepsContainerP3 && panelCostoDepsP3){
+      panelCostoDepsContainerP3.style.display = costoDependientesBase > 0 ? 'flex' : 'none';
+      panelCostoDepsP3.textContent = formatCurrency(costoDependientesFinal);
+  }
+  
+  const panelCostoTotalP3 = $('#step-3 #costoTotalPaso3');
+  if(panelCostoTotalP3) panelCostoTotalP3.textContent = formatCurrency(costoTotalFinal);
+  
+  const panelPeriodicidadP3 = $('#step-3 #periodicidadTextoPaso3');
+  if(panelPeriodicidadP3) panelPeriodicidadP3.textContent = periodicidad.charAt(0).toUpperCase() + periodicidad.slice(1);
+  
+  // const panelDescuentoP3 = $('#step-3 #descuentoAnualPaso3'); 
+  // if(panelDescuentoP3) {
+  //   panelDescuentoP3.textContent = notaDescuento;
+  //   panelDescuentoP3.style.display = esAnual ? 'block' : 'none';
+  // }
+  
+  if (window.formCache && typeof window.formCache === 'object') {
+    window.formCache.costoTotalCalculado = costoTotalFinal;
+    window.formCache.costoTitularCalculado = costoTitularFinal;
+    window.formCache.costoDependientesCalculado = costoDependientesFinal;
+    window.formCache.aplicaDescuentoAnual = esAnual;
+  }
+
+  if (FormState.currentStep === 4) {
+    if (typeof updateResumen === "function") {  
+        updateResumen();
+    } else {
+        console.warn("updateResumen no está definida al intentar actualizar costos para el Paso 4.");
+    }
+  }
+  EventBus.publish('costosActualizados', { 
+    total: costoTotalFinal, 
+    titular: costoTitularFinal, 
+    dependientes: costoDependientesFinal 
+  });
+}
+// FIN DEL REEMPLAZO
+
+function actualizarCostosPorPeriodicidad(periodicidad) {
+  guardarPreferenciasUsuario('periodicidadPago', periodicidad);
+  updateCostos(); 
+  // El mensaje de descuento anual ya no es necesario si solo hay "Mensual"
+  // if (periodicidad.toLowerCase() === 'anual') {
+  //   showNotification('El pago anual incluye un 5% de descuento sobre el total.', 'info');
+  // }
+}
+// ---- FIN FUNCIONES DE COSTOS ----
+
+function getFormDataFromCache() {
+  updateCostos(); // Asegurar que los costos están actualizados en caché
+  return window.formCache || {};
+}
+
+function updateResumen() {
+  const cache = window.formCache;
+  if (!cache) { console.warn("Cache vacío, no se puede actualizar resumen."); return; }
+
+  $('#summary-titular-nombre').textContent = `${cache.primerNombre || ''} ${cache.segundoNombre || ''} ${cache.apellidoPaterno || ''} ${cache.apellidoMaterno || ''}`.trim() || 'N/A';
+  $('#summary-titular-documento').textContent = `${cache.tipoDocumento || 'N/A'}: ${cache.numeroDocumento || 'N/A'}`;
+  $('#summary-titular-nacimiento').textContent = cache.fechaNacimiento ? formatearFecha(cache.fechaNacimiento) : 'N/A';
+  $('#summary-titular-edad').textContent = cache.edad ? `${cache.edad} años` : 'N/A';
+  $('#summary-titular-email').textContent = cache.email || 'N/A';
+  $('#summary-titular-telefono').textContent = cache.telefono || 'N/A';
+
+  const depContainer = $('#dependientes-summary-container');
+  const depBlock = $('#dependientes-summary-block');
+  
+  const numDependientes = parseInt(cache.numeroDependientes || 0);
+  if (depContainer && depBlock) {
+    const template = $('#Paso4 .dependiente-summary-template'); 
+    if (numDependientes > 0 && template) {
+      depBlock.style.display = '';
+      depContainer.innerHTML = ''; 
+      for (let i = 0; i < numDependientes; i++) { // cache usa índice 0
+          const depClone = template.cloneNode(true);
+          depClone.style.display = ''; 
+          depClone.querySelector('.dependiente-num').textContent = i + 1;
+          const nombreDep = `${cache[`dep${i}_primerNombre`] || ''} ${cache[`dep${i}_segundoNombre`] || ''} ${cache[`dep${i}_apellidoPaterno`] || ''} ${cache[`dep${i}_apellidoMaterno`] || ''}`.trim();
+          depClone.querySelector('.dependiente-nombre').textContent = nombreDep || 'N/A';
+          depClone.querySelector('.dependiente-parentesco').textContent = cache[`dep${i}_parentesco`] || 'N/A';
+          depClone.querySelector('.dependiente-documento').textContent = `${cache[`dep${i}_tipoDocumento`] || 'N/A'}: ${cache[`dep${i}_numeroDocumento`] || 'N/A'}`;
+          depClone.querySelector('.dependiente-edad').textContent = cache[`dep${i}_edad`] ? `${cache[`dep${i}_edad`]} años` : 'N/A';
+          depContainer.appendChild(depClone);
+      }
+    } else {
+      depBlock.style.display = 'none';
+      depContainer.innerHTML = '<p class="resumen-mensaje">No se registraron dependientes.</p>'; 
+    }
+  }
+
+  $('#plan-value').textContent = cache.programa || 'ONCOSALUD';
+  const periodicidadResumen = cache.periodicidadPago ? (cache.periodicidadPago.charAt(0).toUpperCase() + cache.periodicidadPago.slice(1)) : 'Mensual';
+  $('#periodicidad-value').textContent = periodicidadResumen;
+  
+  // Usar los costos finales calculados y guardados en caché por updateCostos()
+  $('#monto-titular').textContent = formatCurrency(cache.costoTitularCalculado || 0);
+
+  const montoDepsContainerP4 = $('#monto-dependientes-container');
+  const montoDepsP4 = $('#monto-dependientes');
+  if (cache.costoDependientesCalculado > 0) {
+      if (montoDepsP4) montoDepsP4.textContent = formatCurrency(cache.costoDependientesCalculado);
+      if (montoDepsContainerP4) montoDepsContainerP4.style.display = ''; // MODIFICADO: Revertir al estilo de la clase CSS
+  } else {
+      if (montoDepsContainerP4) montoDepsContainerP4.style.display = 'none';
+  }
+  $('#monto-total-value').textContent = formatCurrency(cache.costoTotalCalculado || 0);
+  
+  const descuentoNotaP4 = $('#descuento-nota');
+  if (descuentoNotaP4) {
+    descuentoNotaP4.style.display = cache.aplicaDescuentoAnual ? 'block' : 'none';
+    if (cache.aplicaDescuentoAnual) { 
+        descuentoNotaP4.innerHTML = `<span class="discount-icon">💰</span> Se ha aplicado un descuento del 5% por pago anual.`;
+    }
+  }
+  
+  const paymentRecurrenceInfo = $('#payment-recurrence-info');
+  if(paymentRecurrenceInfo) paymentRecurrenceInfo.textContent = cache.pagoRecurrente ? 
+      'Has seleccionado pago recurrente. Tu tarjeta será debitada automáticamente cada mes.' : // Solo mensual
+      'Has seleccionado pago manual. Deberás realizar el pago mensual.';
+}
+
+function setupDeclaracionesLinks() {
+ const links = $$('#step-4 .declaration-link');
+ links.forEach(link => {
+   link.addEventListener('click', function(e) {
+     e.preventDefault();
+     const declarationType = this.dataset.declaration; 
+     google.script.run
+        .withSuccessHandler(function(htmlContent) {
+            const modalId = `modal-${declarationType}`;
+            let modal = $(`#${modalId}`);
+            if(!modal) {
+                modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'declaration-modal'; 
+                modal.setAttribute('role', 'dialog');
+                modal.setAttribute('aria-modal', 'true');
+                modal.setAttribute('aria-labelledby', `${modalId}-title`);
+                modal.innerHTML = `
+                    <div class="modal-content-wrapper">
+                      <h3 id="${modalId}-title">Detalles de la Declaración</h3>
+                        <div class="modal-body-content">${htmlContent}</div>
+                        <button class="modal-close-button" aria-label="Cerrar">&times;</button>
+                    </div>`;
+                document.body.appendChild(modal);
+                modal.querySelector('.modal-close-button').addEventListener('click', () => modal.style.display = 'none');
+                modal.addEventListener('click', (ev) => { if(ev.target === modal) modal.style.display = 'none';});
+            }
+            modal.style.display = 'flex';
+        })
+        .withFailureHandler(function(err) {
+            showNotification(`Error al cargar la declaración de ${declarationType}: ${err.message}`, 'error');
+        })
+        .obtenerDeclaracion(declarationType); 
+   });
+ });
+}
+
+let isSubmitting = false; 
+function submitFormData(formData) {
+  return new Promise((resolve, reject) => {
+    const loadingSpinner = $('#processing-indicator'); 
+    const formErrorMessage = $('#form-error-message'); 
+    const submitButtonP4 = $('#submit-form'); 
+
+    if (isSubmitting) {
+      console.warn('Intento de doble envío bloqueado.');
+      reject(new Error('Ya hay un envío en proceso. Por favor, espere.'));
+      return;
+    }
+    isSubmitting = true;
+    if(submitButtonP4) submitButtonP4.disabled = true;
+    if(loadingSpinner) loadingSpinner.style.display = 'flex';
+    if(formErrorMessage) { formErrorMessage.textContent = ''; formErrorMessage.style.display = 'none';}
+
+    console.log("Enviando al backend:", JSON.parse(JSON.stringify(formData))); 
+
+    google.script.run
+.withSuccessHandler(function(result) {
+  isSubmitting = false; 
+  
+  const currentLoadingSpinner = $('#processing-indicator'); 
+  const currentFormErrorMessage = $('#form-error-message'); 
+  const currentSubmitButtonP4 = $('#submit-form'); 
+
+  if(currentLoadingSpinner) currentLoadingSpinner.style.display = 'none';
+  
+  // MODIFICACIÓN SOLICITADA: Limpiar y ocultar el error message ANTES de chequear result.success
+  if(currentFormErrorMessage) { 
+      currentFormErrorMessage.textContent = '';
+      currentFormErrorMessage.style.display = 'none';
+  }
+  
+  console.log("Respuesta del backend:", result);
+
+  // --- COMIENZO DEL BLOQUE QUE ME PROPORCIONASTE ---
+  if (result && result.success) {
+    sessionStorage.removeItem('formCacheASISPLUS'); 
+    window.formCache = {};
+    if (typeof FormState !== 'undefined' && FormState.resetCostosDependientes) {
+      FormState.resetCostosDependientes(); 
+    }
+    if (typeof FormState !== 'undefined' && FormState.setCostoTitular) {
+      FormState.setCostoTitular(0);
+    }
+    if (typeof EventBus !== 'undefined' && EventBus.publish) {
+      EventBus.publish('formSubmitSuccess', result);
+    }
+    
+// NUEVO CÓDIGO PARA EL MANEJO DE init_point (DENTRO DEL withSuccessHandler en submitFormData):
+    if (result.init_point) {
+        // Limpiamos el caché del formulario ya que el registro fue exitoso en nuestro sistema
+        sessionStorage.removeItem('formCacheASISPLUS'); 
+        window.formCache = {}; 
+        if (typeof FormState !== 'undefined') { 
+            if (FormState.resetCostosDependientes) FormState.resetCostosDependientes();
+            if (FormState.setCostoTitular) FormState.setCostoTitular(0);
+        }
+
+        const stepContainer = $('#step-container'); // El div donde se cargan los pasos
+        const navigationButtons = $('.form-navigation'); // El div que contiene los botones Anterior/Siguiente/Completar
+        const progressContainer = $('.progress-container'); // El div de la barra de progreso
+
+        if(stepContainer) {
+            stepContainer.innerHTML = `
+                <div style="text-align: center; padding: 20px 0;">
+                    <h2 style="color: var(--color-success); font-size: 1.8em; margin-bottom: 15px;">🎉 ¡Registro Exitoso!</h2>
+                    <p style="font-size: 1.1em; margin-bottom: 10px;">Hemos preparado tu solicitud de suscripción en Mercado Pago.</p>
+                    <p style="font-size: 1.1em; margin-bottom: 25px;">Por favor, haz clic en el siguiente botón para ser redirigido de forma segura y completar el proceso de pago:</p>
+                    <a id="redirect-to-mp-button" href="${result.init_point}" target="_top" 
+                       class="btn btn-primary" 
+                       style="padding: 12px 25px; text-decoration: none; font-size: 1.1em; background-color: #009EE3; border-color: #009EE3;">
+                        💳 Continuar al Pago en Mercado Pago
+                    </a>
+                    <p style="margin-top: 20px; font-size: 0.85em; color: #666;">
+                        Si el botón no funciona, copia y pega esta URL en una nueva pestaña de tu navegador:<br>
+                        <code style="background-color: #f0f0f0; padding: 3px 5px; border-radius: 3px; display: inline-block; margin-top: 5px;">${result.init_point}</code>
+                    </p>
+                </div>`;
+        }
+        if(navigationButtons) {
+            navigationButtons.style.display = 'none'; // Ocultar botones de navegación del formulario
+        }
+        if(progressContainer){
+            progressContainer.style.display = 'none'; // Ocultar barra de progreso
+        }
+        
+        // Enfocar el nuevo contenido para accesibilidad
+        const newTitle = stepContainer ? stepContainer.querySelector('h2') : null;
+        if (newTitle) newTitle.focus();
+
+        // Ya no necesitamos el showNotification aquí porque la página cambia completamente.
+        // showNotification('¡Registro Exitoso! Por favor, continúa al pago.', 'success', 7000);
+
+    } else {
+      // Esto se ejecuta si result.success es true PERO NO HAY result.init_point
+      // (por ejemplo, si el pago no era recurrente y solo se registró en nuestra BD)
+      if (typeof showConfirmationPage === 'function') { // [from: js_FormularioWizard.html-VGEM.F2.txt (source: 1017)]
+          showConfirmationPage(result); // [from: js_FormularioWizard.html-VGEM.F2.txt (source: 1018)]
+        } else {
+          showNotification('¡Solicitud procesada exitosamente!', 'success', 5000); // [from: js_FormularioWizard.html-VGEM.F2.txt (source: 1019)]
+        }
+    }
+    resolve(result); 
+  } else {
+    if(currentSubmitButtonP4) currentSubmitButtonP4.disabled = false; 
+    const errorMsg = (result && result.error) ? String(result.error) : 'Ocurrió un error desconocido durante el procesamiento.';
+    
+    // Aquí es donde se muestra el error si result.success es false
+    if(currentFormErrorMessage) {
+        currentFormErrorMessage.textContent = errorMsg;
+        currentFormErrorMessage.style.display = 'block';
+    }
+    showNotification(errorMsg, 'error', 8000); 
+    if (typeof EventBus !== 'undefined' && EventBus.publish) {
+      EventBus.publish('formSubmitError', { message: errorMsg });
+    }
+    reject({ message: errorMsg });
+  }
+  // --- FIN DEL BLOQUE QUE ME PROPORCIONASTE ---
+})
+// ... withFailureHandler y el resto ...
+
+      .withFailureHandler(function(error) {
+        isSubmitting = false;
+        if(submitButtonP4) submitButtonP4.disabled = false;
+        if(loadingSpinner) loadingSpinner.style.display = 'none';
+        
+        const errorMsg = `Error de comunicación con el servidor: ${error.message || error}`;
+        if(formErrorMessage) {
+            formErrorMessage.textContent = errorMsg;
+            formErrorMessage.style.display = 'block';
+        }
+        showNotification(errorMsg, 'error', 10000);
+        EventBus.publish('formSubmitError', error);
+        console.error("Error al procesar formulario:", error);
+        reject(error);
+      })
+      .procesarFormulario(formData); 
+  });
+}
+
+
+function showConfirmationPage(result) {
+  const formContainer = $('#app-container'); 
+  const stepContainer = $('#step-container');
+  const navigation = $('.form-navigation');
+  const progress = $('.progress-container');
+
+  if(stepContainer) stepContainer.innerHTML = ''; 
+  if(navigation) navigation.style.display = 'none';
+  if(progress) progress.style.display = 'none';
+  
+  let confirmationContainer = $('#confirmation-page-container');
+  if (!confirmationContainer) {
+    confirmationContainer = document.createElement('div');
+    confirmationContainer.id = 'confirmation-page-container';
+    confirmationContainer.className = 'confirmation-container';
+    if (formContainer) formContainer.appendChild(confirmationContainer);
+    else document.body.appendChild(confirmationContainer);
+  }
+  
+  const emailConfirmacion = (result && result.email) || (window.formCache && window.formCache.email) || 'su correo registrado';
+  const idSolicitud = (result && result.registroId) || 'N/A';
+  
+  // CORRECCIÓN PARA MONTO TOTAL: Asegurarse de que se usa result.montoTotal si está definido y es un número.
+  let costoTotalConfirmacion = 0;
+  if (result && typeof result.montoTotal === 'number' && !isNaN(result.montoTotal)) {
+    costoTotalConfirmacion = result.montoTotal;
+  } else if (window.formCache && typeof window.formCache.costoTotalCalculado === 'number' && !isNaN(window.formCache.costoTotalCalculado)) {
+    costoTotalConfirmacion = window.formCache.costoTotalCalculado;
+  }
+  console.log("SHOW_CONFIRMATION_PAGE: Monto total a mostrar:", costoTotalConfirmacion, "Obtenido de result:", (result && result.montoTotal));
+
+  const periodicidadConfirmacion = (window.formCache && window.formCache.periodicidadPago) ? (window.formCache.periodicidadPago.charAt(0).toUpperCase() + window.formCache.periodicidadPago.slice(1)) : 'Mensual';
+  const fechaDeRegistroActual = formatearFecha(new Date()); 
+
+  confirmationContainer.innerHTML = `
+    <div class="confirmation-content-wrapper" style="text-align: center; padding: 20px; border: 1px solid #ddd; margin-top: 20px; border-radius: 8px;"> 
+      <div class="confirmation-icon" aria-hidden="true" style="color: var(--color-success); font-size: 3rem; text-align: center; margin-bottom: 10px;">✓</div>
+      <h2 class="confirmation-title" id="confirmation-title" style="text-align: center; color: var(--color-primary); margin-bottom: 15px;">¡Registro Exitoso!</h2>
+      <p style="text-align: center; margin-bottom: 10px;">Su solicitud ha sido registrada correctamente.</p>
+      <p style="text-align: center; margin-bottom: 20px;">Recibirá un correo electrónico con los detalles de su afiliación a: <strong>${emailConfirmacion}</strong></p>
+      
+      <div class="confirmation-details" style="margin-top: 20px; padding:15px; border: 1px solid #eee; border-radius: var(--radius-md); background-color: #f9f9f9; text-align: left;">
+        <h3 style="margin-bottom:10px; font-size: 1.1em; color: var(--color-secondary);">Detalles de su solicitud:</h3>
+        <p><strong>Número de solicitud:</strong> ${idSolicitud}</p>
+        <p><strong>Fecha de registro:</strong> ${fechaDeRegistroActual}</p>
+        <p><strong>Programa:</strong> ONCOSALUD</p>
+        <p><strong>Monto total (${periodicidadConfirmacion}):</strong> ${formatCurrency(costoTotalConfirmacion)}</p>
+      </div>
+      
+      <div class="confirmation-actions" style="margin-top: 30px; text-align: center;">
+        <button id="btn-nuevo-registro" class="btn btn-primary">Realizar Nuevo Registro</button>
+      </div>
+      <div class="confirmation-support" style="margin-top: 20px; text-align: center; font-size: 0.9em; color: var(--color-text-light);">
+        <p>¿Tienes dudas? Comunícate con nuestro equipo de soporte al <strong>(01) 513-7900</strong> o escribe a <strong>soporte@asisplus.com</strong></p>
+      </div>
+    </div>`;
+  
+  confirmationContainer.style.display = 'block';
+  const titleEl = confirmationContainer.querySelector('#confirmation-title');
+  if (titleEl) titleEl.focus();
+
+  const btnNuevoRegistro = $('#btn-nuevo-registro');
+  if (btnNuevoRegistro) {
+    btnNuevoRegistro.addEventListener('click', () => {
+        sessionStorage.removeItem('formCacheASISPLUS'); 
+        window.formCache = {}; 
+        if (typeof FormState !== 'undefined') { 
+            FormState.currentStep = 1;
+            FormState.costoTitular = 0;
+            FormState.costoDependientes = 0;
+            FormState.dependientesCostos = {};
+        }
+        window.location.reload(); 
+    });
+  } else {
+    console.warn("Botón #btn-nuevo-registro no encontrado en la página de confirmación.");
+  }
+
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (typeof EventBus !== 'undefined' && EventBus.publish) {
+    EventBus.publish('confirmationPageDisplayed', result);
+  }
+}
+
+// --- FUNCIONES DE UI GENERALES Y ACCESIBILIDAD ---
+function setupAccessibility() {
+  const formAppContainer = $('#app-container'); 
+  if (formAppContainer) formAppContainer.setAttribute('role', 'application'); 
+  
+  const formContainer = $('#form-container'); // Si tienes un div específico con este ID para el form.
+  if (formContainer) {
+      formContainer.setAttribute('role', 'form');
+      // Si el H1 de "Programa ONCOPLUS" tiene un ID, úsalo para aria-labelledby
+      // const mainTitle = $('.form-header h1');
+      // if(mainTitle && mainTitle.id) formContainer.setAttribute('aria-labelledby', mainTitle.id);
+  }
+  const progressBar = $('#progress-indicator');
+  if (progressBar) {
+    progressBar.setAttribute('role', 'progressbar');
+    progressBar.setAttribute('aria-valuemin', '0'); 
+  }
+}
+
+function enhanceStepAccessibility(stepNumber) {
+  const currentStepContainer = $(`#step-${stepNumber}`);
+  if (!currentStepContainer) return;
+
+  currentStepContainer.querySelectorAll('input, select, textarea').forEach(input => {
+    if (!input.id && input.name) input.id = input.name; 
+    if (input.id) {
+      const label = $(`label[for="${input.id}"]`);
+      if (!label) console.warn(`Campo sin label asociado: #${input.id}`);
+      
+      const errorMsgEl = $(`#${input.id}-error`); // Busca el error-message específico
+      const helpTextEl = $(`#${input.id}-help`); // Busca el help-text específico
+      let describedBy = '';
+      if (errorMsgEl && errorMsgEl.id) describedBy += `${errorMsgEl.id} `;
+      if (helpTextEl && helpTextEl.id) describedBy += helpTextEl.id;
+      
+      if (describedBy.trim()) input.setAttribute('aria-describedby', describedBy.trim());
+      else input.removeAttribute('aria-describedby'); // Limpiar si no hay descriptores
+    }
+    if(input.hasAttribute('required') || (input.dataset.validation && input.dataset.validation.includes('required'))) {
+        input.setAttribute('aria-required', 'true');
+    } else {
+        input.setAttribute('aria-required', 'false'); // Explícitamente no requerido
+    }
+  });
+}
+
+function setupAutoFillDetectionForStep() { 
+    // La detección global de 'animationstart' en enhanceAutoFillDetection debería ser suficiente.
+    // Si necesitas lógica específica de autofill por paso, puedes añadirla aquí.
+}
+
+function enhanceAutoFillDetection() {
+  // Tu código existente para detectar autofill con animationstart.
+  const style = document.createElement('style');
+  style.textContent = `
+    input:-webkit-autofill { animation-name: onAutoFillStartASIS; } /* Nombre único para la animación */
+    input:not(:-webkit-autofill) { animation-name: onAutoFillCancelASIS; }
+    @keyframes onAutoFillStartASIS {} @keyframes onAutoFillCancelASIS {}
+  `;
+  document.head.appendChild(style);
+  
+  document.addEventListener('animationstart', function(e) {
+    if (e.animationName === 'onAutoFillStartASIS' && e.target.tagName === 'INPUT') {
+      console.log('Autofill detectado por animación en:', e.target.id || e.target.name);
+      const event = new Event('change', { bubbles: true });
+      e.target.dispatchEvent(event);
+      // Adicionalmente, forzar una validación visual si el campo tiene reglas
+      if (e.target.dataset && e.target.dataset.validation) {
+        setTimeout(() => validarCampo(e.target, false), 50); // Pequeño delay
+      }
+    }
+  });
+}
+
+function adjustInterfaceForDevice() { /* ... (tu código existente) ... */ }
+
+// --- MODO DEBUG (OPCIONAL) ---
+function enableDebugMode(){
+    window.runDiagnostics = function() { /* ... tu código de diagnóstico ... */ };
+    window.FormStateDebug = FormState; 
+    window.EventBusDebug = EventBus; 
+    window.debugForm = {
+        getCache: () => window.formCache,
+        getState: () => FormState,
+        clearCache: () => { 
+            window.formCache = {}; 
+            sessionStorage.removeItem('formCacheASISPLUS'); 
+            FormState.resetCostosDependientes(); 
+            FormState.setCostoTitular(0); 
+            if (typeof updateCostos === "function") updateCostos(); 
+            console.log("Caché y estado de costos reseteados."); 
+            return "Caché y estado de costos reseteados.";
+        },
+        resetForm: () => { window.debugForm.clearCache(); window.location.reload(); },
+        jumpToStep: (step) => { 
+            const s = parseInt(step);
+            if (s >= 1 && s <= FormState.totalSteps) { loadStep(s); } 
+            else { console.error(`Paso inválido: ${s}`);} 
+        },
+        showAllErrors: () => $$(`#step-${FormState.currentStep} [data-validation]`).forEach(field => validarCampo(field, true))
+    };
+    
+    if (!$('#debug-toolbar-asisplus')) {
+        const debugToolbar = document.createElement('div');
+        debugToolbar.id = 'debug-toolbar-asisplus';
+        debugToolbar.className = 'debug-toolbar'; 
+        debugToolbar.innerHTML = `
+            <div class="debug-toolbar-header">Debug ASISPLUS</div>
+            <div class="debug-toolbar-content">
+            Paso: <span id="debug-step-display">${FormState.currentStep}</span> 
+            <button onclick="window.debugForm.jumpToStep(FormState.currentStep - 1)">◀</button>
+            <button onclick="window.debugForm.jumpToStep(FormState.currentStep + 1)">▶</button>
+            <button onclick="console.log(window.debugForm.getCache())">Cache</button>
+            <button onclick="console.log(window.debugForm.getState())">State</button>
+            <button onclick="window.debugForm.clearCache()">Limpiar Cache</button>
+            <button onclick="window.debugForm.showAllErrors()">Ver Errores</button>
+            <button onclick="console.table(window.runDiagnostics ? window.runDiagnostics() : 'N/A')">Diagnóstico</button>
+            </div>`;
+        document.body.appendChild(debugToolbar);
+        EventBus.subscribe('stepLoaded', (data) => { 
+            const el = $('#debug-step-display'); 
+            if(el) el.textContent = data.step; 
+        });
+    }
+    console.log("Modo depuración ASISPLUS activado. Usa window.debugForm para herramientas.");
+}
+
+// Funciones de utilidades que deben estar en js_Utilidades.html pero se incluyen aquí
+// si no están disponibles globalmente por alguna razón (ej. carga de scripts)
+// Idealmente, estas deberían ser llamadas desde js_Utilidades.html
+// Si ya las tienes en js_Utilidades.html y ese archivo se carga ANTES que este, puedes eliminar estas de aquí.
+
+// function $(selector) { return document.querySelector(selector); }
+// function $$(selector) { return Array.from(document.querySelectorAll(selector)); }
+// function calcularEdad(birthDateInput) { /* ... (definición completa) ... */ }
+// function formatCurrency(amount) { /* ... (definición completa) ... */ }
+// function formatearFecha(dateInput) { /* ... (definición completa) ... */ }
+// function validarCampo(field, showErrors) { /* ... (definición completa desde js_Utilidades) ... */ }
+// function validarPaso(stepNumber) { /* ... (definición completa desde js_Utilidades) ... */ }
+// function showNotification(message, type, duration) { /* ... (definición completa desde js_Utilidades) ... */ }
+
+</script>

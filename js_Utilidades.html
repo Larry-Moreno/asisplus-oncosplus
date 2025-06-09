@@ -1,0 +1,412 @@
+<script>
+  /**
+   * Utilidades generales para el formulario ASISPLUS-ONCOPLUS
+   * Contiene selectores DOM, un sistema de validación robusto,
+   * y funciones auxiliares para formato y cálculo.
+   */
+
+  // Selectores DOM simplificados
+  function $(selector) {
+    return document.querySelector(selector);
+  }
+  function $$(selector) {
+    return Array.from(document.querySelectorAll(selector));
+  }
+
+  // --- Sistema de Validación ---
+  const Validators = {
+    validate: function(rule, value, field) {
+      const parts = rule.split(':');
+      const ruleName = parts[0];
+      const params = parts.length > 1 ? parts[1].split(',') : [];
+
+      switch (ruleName) {
+        case 'required':
+          const valToCheck = (field && field.type === 'checkbox') ? field.checked : value;
+          return {
+            valid: this.required(valToCheck),
+            message: field.dataset.validationMessageRequired || field.dataset.validationMessage || 'Este campo es obligatorio'
+          };
+        case 'email':
+          return {
+            valid: this.email(value),
+            message: field.dataset.validationMessageEmail || field.dataset.validationMessage || 'Ingrese un correo electrónico válido'
+          };
+        case 'dni': // Regla específica para DNI
+          return {
+            valid: /^\d{8}$/.test(String(value || '').replace(/\D/g, '')),
+            message: field.dataset.validationMessageDni || field.dataset.validationMessage || 'El DNI debe tener 8 dígitos numéricos'
+          };
+        case 'ce': // Regla específica para CE
+          return {
+            valid: /^[A-Za-z0-9]{1,12}$/.test(String(value || '')),
+            message: field.dataset.validationMessageCe || field.dataset.validationMessage || 'El CE debe tener entre 1 y 12 caracteres alfanuméricos'
+          };
+        case 'phone':
+          return {
+            valid: this.phone(value),
+            message: field.dataset.validationMessagePhone || field.dataset.validationMessage || 'El teléfono debe tener 9 dígitos'
+          };
+        case 'date':
+          return {
+            valid: this.date(value),
+            message: field.dataset.validationMessageDate || field.dataset.validationMessage || 'Ingrese una fecha válida' // Mensaje más genérico para fecha
+          };
+        case 'text':
+          return {
+            valid: this.text(value),
+            message: field.dataset.validationMessageText || field.dataset.validationMessage || 'Ingrese solo letras y espacios'
+          };
+        case 'minAge':
+          const minAgeParam = field.dataset.validationMinAge || (params.length > 0 ? params[0] : '18');
+          const ageNum = parseInt(minAgeParam);
+          const isValidAge = this.minAge(value, ageNum);
+          return {
+            valid: isValidAge,
+            message: isValidAge ? '' : (field.dataset.validationMessageEdad || field.dataset.validationMessage || `Debe ser mayor de ${ageNum} años`)
+          };
+        default:
+          console.warn(`Regla de validación desconocida: ${ruleName}`);
+          return { valid: true, message: '' }; // Considerar inválido si la regla es desconocida o retornar error
+      }
+    },
+
+    required: function(value) {
+      if (typeof value === 'boolean') return value; // Para checkboxes
+      return value !== null && value !== undefined && String(value).trim() !== '';
+    },
+
+    email: function(value) {
+      if (!value || String(value).trim() === '') return true;
+      const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return pattern.test(String(value));
+    },
+
+    phone: function(value) {
+      if (!value || String(value).trim() === '') return true;
+      return /^\d{9}$/.test(String(value).replace(/\D/g, ''));
+    },
+
+    date: function(value) {
+      if (!value || String(value).trim() === '') return true;
+      const date = new Date(String(value)); // String(value) para asegurar que es un string antes de pasarlo a Date
+      const year = date.getFullYear();
+      // Verifica que la fecha sea parseable y que el año esté en un rango razonable.
+      // El input type="date" ya pre-valida el formato.
+      return !isNaN(date.getTime()) && year > 1900 && year < (new Date().getFullYear() + 1); // No fechas futuras más allá del año actual
+    },
+
+    text: function(value) {
+      if (!value || String(value).trim() === '') return true;
+      return /^[A-Za-záéíóúÁÉÍÓÚñÑÜü\s]+$/.test(String(value));
+    },
+
+    minAge: function(birthDateStr, minAge = 18) {
+      if (!birthDateStr || String(birthDateStr).trim() === '') return true; // Si no hay fecha, no es error de edad (required lo maneja)
+      const age = calcularEdad(String(birthDateStr));
+      return age >= minAge;
+    }
+  };
+
+  /**
+   * Valida un campo individual y actualiza la UI.
+   */
+  function validarCampo(field, showErrors = false) {
+    if (!field || !field.dataset || !field.dataset.validation) return true;
+    
+    const validationRules = field.dataset.validation.split('|');
+    let defaultValidationMessage = field.dataset.validationMessage || 'Este campo presenta un error.';
+    
+    field.classList.remove('is-invalid', 'is-valid');
+    
+    // Asegurar que el contenedor de error exista y tenga el ID correcto
+    let errorContainerId = field.id ? `${field.id}-error` : `error-${Math.random().toString(36).substring(2,9)}`;
+    let errorContainer = $(`#${errorContainerId}`);
+    if (!errorContainer) {
+        errorContainer = document.createElement('div');
+        errorContainer.className = 'error-message';
+        errorContainer.id = errorContainerId;
+        // Insertar después del campo, o dentro de su form-group si es más limpio
+        field.parentNode.insertBefore(errorContainer, field.nextSibling);
+    }
+    field.setAttribute('aria-describedby', errorContainerId); // Siempre asociar
+    errorContainer.textContent = '';
+    errorContainer.style.display = 'none';
+    
+    let value = (field.type === 'checkbox') ? field.checked : field.value;
+    let isValid = true;
+    let errorMessageToDisplay = '';
+
+    for (const rule of validationRules) {
+      if (!isValid) break; // No seguir si ya falló una regla
+      const result = Validators.validate(rule, value, field);
+      if (!result.valid) {
+        isValid = false;
+        errorMessageToDisplay = result.message;
+      }
+    }
+    
+    if (!isValid) {
+      field.classList.add('is-invalid');
+      errorContainer.textContent = errorMessageToDisplay || defaultValidationMessage;
+      if (showErrors) {
+          errorContainer.style.display = 'block';
+      }
+      field.setAttribute('aria-invalid', 'true');
+    } else {
+      field.classList.add('is-valid');
+      field.setAttribute('aria-invalid', 'false');
+      // No se oculta el errorContainer, solo se limpia su texto.
+      // Esto evita que el layout "salte" si el error se muestra y luego se oculta.
+      // Si se prefiere ocultar: errorContainer.style.display = 'none';
+    }
+    return isValid;
+  }
+
+  /**
+   * Valida todos los campos visibles y habilitados de un paso.
+   */
+// REEMPLAZA TU FUNCIÓN validarPaso ACTUAL EN js_Utilidades.html CON ESTA:
+function validarPaso(stepNumber) {
+  const stepContent = $(`#step-${stepNumber}`);
+  if (!stepContent) {
+    console.warn(`Contenido del paso ${stepNumber} no encontrado para validar.`);
+    return true; // Si no hay contenido, no hay nada que validar erróneamente
+  }
+
+  // Considerar window.skipDependientesValidation si es el paso 3 y no hay dependientes activos
+  // Esta variable se establece en setupPaso3Events si numeroDependientes es 0.
+  if (stepNumber === 3 && window.skipDependientesValidation === true) {
+    console.log("Saltando validación del paso 3 (dependientes no requeridos o no seleccionados).");
+    return true;
+  }
+
+  let isStepValid = true;
+  let firstInvalidField = null;
+
+  if (stepNumber === 3) {
+    // Lógica especial para el Paso 3: validar campos de todos los dependientes activos,
+    // independientemente de si su acordeón está expandido.
+    const numDependientes = parseInt(window.formCache.numeroDependientes || 0);
+    if (numDependientes > 0) {
+      console.log(`ASISPLUS_DEBUG | validarPaso (Paso 3) - Validando ${numDependientes} dependientes.`);
+      for (let i = 1; i <= numDependientes; i++) { // Iterar por el número de dependientes que DEBERÍA HABER (UI Index 1-based)
+        const dependienteItem = $(`#dependiente-item-${i}`); // El contenedor del acordeón del dependiente i
+        if (dependienteItem) {
+          const camposDelDependiente = dependienteItem.querySelectorAll('[data-validation]');
+          camposDelDependiente.forEach(field => {
+            if (!field.disabled) { // Solo validar campos habilitados
+              if (!validarCampo(field, true)) { // Siempre mostrar errores al validar el paso
+                console.log(`ASISPLUS_DEBUG | validarPaso (Paso 3) - Campo inválido encontrado: ${field.id} para Dependiente UI #${i}`);
+                isStepValid = false;
+                if (!firstInvalidField) {
+                  firstInvalidField = field;
+                }
+              }
+            }
+          });
+        } else {
+          console.warn(`ASISPLUS_DEBUG | validarPaso (Paso 3) - Contenedor del dependiente #dependiente-item-${i} no encontrado para validación.`);
+          // Podrías considerar esto como un error de validación si se espera que el contenedor exista
+          // isStepValid = false; // Descomentar si la ausencia del contenedor es un fallo de validación
+        }
+      }
+    }
+    // Aquí podrías añadir la validación de otros campos generales del Paso 3 si los hubiera,
+    // fuera de los acordeones de dependientes.
+  } else {
+    // Lógica original para otros pasos (Paso 1, 2, 4)
+    const fieldsToValidate = []; // Crear array para recolectar campos visibles
+    const allFieldsInStep = stepContent.querySelectorAll('[data-validation]');
+    allFieldsInStep.forEach(field => {
+      // Validar solo si está visible y habilitado para los otros pasos
+      if (field.offsetWidth > 0 && field.offsetHeight > 0 && !field.disabled) {
+        fieldsToValidate.push(field);
+      }
+    });
+
+    fieldsToValidate.forEach(field => {
+      if (!validarCampo(field, true)) { // Siempre mostrar errores al validar el paso
+        isStepValid = false;
+        if (!firstInvalidField) {
+          firstInvalidField = field;
+        }
+      }
+    });
+  }
+
+  if (!isStepValid && firstInvalidField) {
+    showNotification('Por favor, corrija los campos marcados en rojo antes de continuar.', 'warning');
+    
+    // Lógica para expandir el acordeón del primer campo inválido si estamos en el Paso 3
+    if (stepNumber === 3) { // No necesitamos '&& firstInvalidField' aquí porque ya está dentro del if.
+        const acordeonContent = firstInvalidField.closest('.acordeon-content');
+        if (acordeonContent && acordeonContent.style.display === 'none') {
+            const header = acordeonContent.previousElementSibling; // El .acordeon-header
+            if (header && typeof header.click === 'function') { // Verificar si el header y su método click existen
+                console.log('ASISPLUS_DEBUG | validarPaso (Paso 3) - Abriendo acordeón para mostrar campo inválido:', firstInvalidField.id);
+                header.click(); // Simular clic para expandir
+            }
+        }
+    }
+    // Intentar poner el foco después de una posible expansión del acordeón
+    setTimeout(() => {
+        if(firstInvalidField && typeof firstInvalidField.focus === 'function') {
+             firstInvalidField.focus();
+        }
+    }, 100); // Pequeño delay para dar tiempo a que el acordeón se expanda visualmente
+  }
+  
+  console.log(`ASISPLUS_DEBUG | validarPaso (Paso ${stepNumber}) - Resultado de validación: ${isStepValid}`);
+  return isStepValid;
+}
+// FIN DEL REEMPLAZO
+
+  // --- Funciones Auxiliares ---
+
+  /**
+   * Calcula la edad a partir de una fecha de nacimiento.
+   */
+  function calcularEdad(birthDateInput) {
+    if (!birthDateInput) return 0;
+    let birthDate;
+    if (typeof birthDateInput === 'string') {
+      const parts = birthDateInput.split('-'); // Asume YYYY-MM-DD
+      if (parts.length === 3) {
+        birthDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      } else {
+        birthDate = new Date(birthDateInput); // Fallback
+      }
+    } else if (birthDateInput instanceof Date) {
+      birthDate = birthDateInput;
+    } else {
+      return 0; 
+    }
+    if (isNaN(birthDate.getTime())) return 0;
+
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age < 0 ? 0 : age;
+  }
+
+  /**
+   * Formatea un valor numérico como moneda peruana (S/).
+   */
+  function formatCurrency(value) {
+    const num = parseFloat(value);
+    if (isNaN(num)) return 'S/ 0.00';
+    return `S/ ${num.toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,')}`;
+  }
+
+  /**
+   * Formatea una fecha (objeto Date o string YYYY-MM-DD) a DD/MM/YYYY.
+   */
+  function formatearFecha(dateInput) {
+    if (!dateInput) return '';
+    let d;
+    if (typeof dateInput === 'string') {
+      // Para YYYY-MM-DD, new Date() puede interpretarlo como UTC.
+      // Es más seguro parsearlo manualmente para evitar problemas de zona horaria.
+      if (dateInput.includes('-')) { 
+          const parts = dateInput.split('-');
+          if (parts.length === 3) {
+            d = new Date(parts[0], parts[1]-1, parts[2]); // Mes es 0-indexado
+          } else {
+            d = new Date(dateInput); // Fallback
+          }
+      } else {
+        d = new Date(dateInput); // Fallback
+      }
+    } else if (dateInput instanceof Date) {
+      d = dateInput;
+    } else {
+      return ''; 
+    }
+    if (isNaN(d.getTime())) return '';
+    
+    const day = String(d.getDate()).padStart(2, '0');
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  /**
+   * Muestra una notificación al usuario.
+   */
+  function showNotification(message, type = 'info', duration = 5000) {
+    let notificationArea = $('#notification-area');
+    if (!notificationArea) {
+        console.warn("Área de notificación ('#notification-area') no encontrada. Creando una temporalmente.");
+        notificationArea = document.createElement('div');
+        notificationArea.id = 'notification-area';
+        notificationArea.className = 'notification-area'; // Asegúrate que esta clase está en tu CSS
+        document.body.appendChild(notificationArea);
+    }
+    
+    const notification = document.createElement('div');
+    notification.className = `notification notification-${type}`; // Clases para estilado
+    notification.setAttribute('role', (type === 'error' || type === 'warning') ? 'alert' : 'status');
+    notification.setAttribute('aria-live', (type === 'error' || type === 'warning') ? 'assertive' : 'polite');
+    
+    const messageSpan = document.createElement('span');
+    messageSpan.textContent = message; // Seguro contra XSS
+    
+    const closeButton = document.createElement('button');
+    closeButton.className = 'notification-close';
+    closeButton.innerHTML = '&times;'; // Símbolo de cierre
+    closeButton.setAttribute('aria-label', 'Cerrar notificación');
+    closeButton.type = 'button'; // Evitar que envíe formularios si está dentro de uno
+    
+    notification.appendChild(messageSpan);
+    notification.appendChild(closeButton);
+    notificationArea.appendChild(notification);
+    
+    const timerId = setTimeout(() => {
+      notification.classList.add('notification-hiding'); // Para animación de salida
+      setTimeout(() => notification.remove(), 300); // Tiempo para que termine la animación
+    }, duration);
+
+    closeButton.addEventListener('click', () => {
+      clearTimeout(timerId);
+      notification.classList.add('notification-hiding');
+      setTimeout(() => notification.remove(), 300);
+    });
+  }
+
+  /**
+   * Obtiene los datos del formulario desde el caché global `window.formCache`.
+   */
+  function getFormData() { 
+    // Asegurar que los últimos cálculos de costos están en el caché antes de obtener los datos
+    if (typeof updateCostos === "function") { // Si updateCostos está disponible globalmente
+        updateCostos(); // Esto podría actualizar window.formCache.costoTotalCalculado etc.
+    }
+    return window.formCache || {};
+  }
+
+  // La función submitFormData(data) se moverá/consolidará en js_FormularioWizard.html
+  // ya que es más específica del flujo del wizard y su interacción con el backend.
+
+  function guardarPreferenciasUsuario(key, value) {
+  if (!window.formCache) {
+    window.formCache = {};
+  }
+  window.formCache[key] = value;
+  try {
+    sessionStorage.setItem('formCacheASISPLUS', JSON.stringify(window.formCache));
+  } catch (e) {
+    console.error("Error guardando preferencia en sessionStorage:", e);
+    // Opcional: notificar al usuario si es crítico
+  }
+  // Opcional: Publicar evento si usas EventBus para esto
+  // if (typeof EventBus !== 'undefined' && EventBus.publish) {
+  //   EventBus.publish('preferenceChanged', { key, value });
+  // }
+  return value;
+}
+
+</script>

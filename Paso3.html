@@ -1,0 +1,160 @@
+<div class="step-content" id="step-3">
+  <h2>Datos de Dependientes</h2>
+  <p class="step-description">Ingresa los datos de las personas que deseas incluir en tu plan.</p>
+
+  <div id="no-dependientes" class="message-info" style="display: none;">
+    No has indicado dependientes. Puedes continuar al siguiente paso.
+  </div>
+
+  <div id="dependientes-container">
+    <div id="dependiente-template" class="dependiente-acordeon" style="display: none;">
+      <div class="acordeon-header" tabindex="0" aria-expanded="false" aria-controls="acordeon-content-0">
+        <h3>Dependiente <span class="dependiente-num">1</span></h3>
+        <div class="acordeon-toggle"><span class="icon-expand">+</span><span class="icon-collapse">-</span></div>
+      </div>
+      <div id="acordeon-content-0" class="acordeon-content" aria-hidden="true">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="primerNombre-0">Primer nombre <span class="required">*</span></label>
+            <input type="text" id="primerNombre-0" name="dependientes[0].primerNombre" required 
+                  data-validation="required|text" data-validation-message="Ingrese un primer nombre válido (solo letras)"
+                  aria-required="true">
+            <div class="error-message" id="primerNombre-0-error"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="segundoNombre-0">Segundo nombre</label>
+            <input type="text" id="segundoNombre-0" name="dependientes[0].segundoNombre" 
+                  data-validation="text" data-validation-message="Ingrese un segundo nombre válido (solo letras)">
+            <div class="error-message" id="segundoNombre-0-error"></div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="apellidoPaterno-0">Apellido paterno <span class="required">*</span></label>
+            <input type="text" id="apellidoPaterno-0" name="dependientes[0].apellidoPaterno" required
+                  data-validation="required|text" data-validation-message="Ingrese un apellido paterno válido (solo letras)"
+                  aria-required="true">
+            <div class="error-message" id="apellidoPaterno-0-error"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="apellidoMaterno-0">Apellido materno <span class="required">*</span></label>
+            <input type="text" id="apellidoMaterno-0" name="dependientes[0].apellidoMaterno" required
+                  data-validation="required|text" data-validation-message="Ingrese un apellido materno válido (solo letras)"
+                  aria-required="true">
+            <div class="error-message" id="apellidoMaterno-0-error"></div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="tipoDocumento-0">Tipo de documento <span class="required">*</span></label>
+            <select id="tipoDocumento-0" name="dependientes[0].tipoDocumento" required
+                   data-validation="required" data-validation-message="Seleccione un tipo de documento"
+                   aria-required="true">
+              <option value="">Seleccione...</option>
+              <option value="DNI">DNI</option>
+              <option value="CE">CE</option>
+            </select>
+            <div class="error-message" id="tipoDocumento-0-error"></div>
+            <div class="help-text">DNI para peruanos, CE para extranjeros</div>
+          </div>
+
+          <div class="form-group">
+            <label for="numeroDocumento-0">Número de documento <span class="required">*</span></label>
+            <input type="text" id="numeroDocumento-0" name="dependientes[0].numeroDocumento" required
+                  data-validation="required"
+                  data-validation-message-dni="Ingrese un DNI válido de 8 dígitos"
+                  data-validation-message-ce="Ingrese un CE válido de 1 a 12 caracteres"
+                  data-validation-message="Seleccione primero un tipo de documento"
+                  aria-required="true" disabled placeholder="Seleccione tipo primero">
+            <div class="error-message" id="numeroDocumento-0-error"></div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="fechaNacimiento-0">Fecha de nacimiento <span class="required">*</span></label>
+            <input type="date" id="fechaNacimiento-0" name="dependientes[0].fechaNacimiento" required
+                  data-validation="required|date" 
+                  data-validation-message="Ingrese una fecha válida"
+                  data-update-costs="true"
+                  aria-required="true">
+            <div class="error-message" id="fechaNacimiento-0-error"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="sexo-0">Sexo <span class="required">*</span></label>
+            <select id="sexo-0" name="dependientes[0].sexo" required
+                   data-validation="required" data-validation-message="Seleccione una opción"
+                   aria-required="true">
+              <option value="">Seleccione...</option>
+              <option value="M">Masculino</option>
+              <option value="F">Femenino</option>
+            </select>
+            <div class="error-message" id="sexo-0-error"></div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="parentesco-0">Parentesco <span class="required">*</span></label>
+            <select id="parentesco-0" name="dependientes[0].parentesco" required
+                   data-validation="required" data-validation-message="Seleccione una opción"
+                   aria-required="true">
+              <option value="">Seleccione...</option>
+              <option value="CONYUGE">Cónyuge</option>
+              <option value="HIJO">Hijo/a</option>
+              <option value="PADRE">Padre</option>
+              <option value="MADRE">Madre</option>
+              <option value="OTRO">Otro</option>
+            </select>
+            <div class="error-message" id="parentesco-0-error"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="paisNacimiento-0">País de nacimiento <span class="required">*</span></label>
+            <select id="paisNacimiento-0" name="dependientes[0].paisNacimiento" required
+                   data-validation="required" data-validation-message="Seleccione un país"
+                   aria-required="true">
+              <option value="">Seleccione...</option>
+              <option value="PER">Perú</option>
+              <option value="OTRO">Otro</option>
+            </select>
+            <div class="error-message" id="paisNacimiento-0-error"></div>
+          </div>
+        </div>
+
+        <div class="dependiente-cost">
+          <div class="cost-label">Costo mensual estimado:</div>
+          <div class="cost-value">
+            <span class="costo-dependiente-valor" data-dependiente-index="0">0.00</span>
+          </div>
+          <div class="cost-calculation-note">El costo se calcula automáticamente según la edad.</div>
+        </div>
+
+      </div> </div> </div> <div class="cost-summary-container">
+    <h3>Resumen de Costos</h3>
+    <div id="resumenCostosPaso3" class="cost-summary">
+      <div class="cost-item">
+        <span class="cost-label">Titular:</span>
+        <span class="cost-value" id="costoTitularPaso3">S/ 0.00</span>
+      </div>
+      <div class="cost-item" id="costoDependientesContainerPaso3" style="display: none;">
+        <span class="cost-label">Dependientes:</span>
+        <span class="cost-value" id="costoDependientesPaso3">S/ 0.00</span>
+      </div>
+      <div class="cost-item total">
+        <span class="cost-label">Total Mensual:</span>
+        <span class="cost-value" id="costoTotalPaso3">S/ 0.00</span>
+      </div>
+      <div class="cost-note">
+        <span>Periodicidad: <span id="periodicidadTextoPaso3">Mensual</span></span>
+      </div>
+      <div class="cost-update-status" style="margin-top: 5px;"> <span class="update-note">Los costos se calculan automáticamente según la edad.</span>
+      </div>
+    </div>
+  </div>
+</div>
