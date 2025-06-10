@@ -1065,7 +1065,7 @@ function _crearHojaTramaGrupales() {
     try {
       const proteccion = sheet.protect().setDescription('Protección del sistema ASISPLUS');
       proteccion.removeEditors(proteccion.getEditors());
-      proteccion.addEditor(Session.getEffectiveUser());
+      // Línea eliminada: proteccion.addEditor(Session.getEffectiveUser());
       Logger.log(`Hoja '${sheetName}' creada y protegida.`);
     } catch (e) {
       Logger.log(`No se pudo proteger automáticamente la hoja '${sheetName}'. Error: ${e.message}`);
