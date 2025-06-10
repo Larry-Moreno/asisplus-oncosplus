@@ -3,21 +3,59 @@
  * ---------------------------------------------------
  * Este script crea y gestiona la estructura completa del sistema,
  * incluyendo la configuración del entorno, menús personalizados,
- * y un sistema de seguridad de protección global para todas las hojas.
+ * y un sistema de seguridad de "interruptor digital" para el autobloqueo del propietario.
  *
- * Versión con nuevo sistema de seguridad (Junio 2025)
+ * Versión con nuevo sistema de seguridad "onEdit" (Junio 2025)
  */
 
 const NOMBRE_PROPIEDAD_CONTRASENA = 'editorPropietarioPassword';
+const CACHE_KEY_DESBLOQUEO = 'isSheetEditingUnlocked';
+const DURACION_DESBLOQUEO_SEGUNDOS = 60 * 60; // 60 minutos
+
+/**
+ * Se ejecuta cuando se edita una celda.
+ * Revertirá la edición si el libro está en modo "bloqueado".
+ */
+function onEdit(e) {
+  // Si la edición fue hecha por un script, no hacer nada.
+  if (e.authMode == ScriptApp.AuthMode.NONE || e.authMode == ScriptApp.AuthMode.CUSTOM_FUNCTION) {
+    return;
+  }
+  
+  const cache = CacheService.getUserCache();
+  const isUnlocked = cache.get(CACHE_KEY_DESBLOQUEO);
+
+  // Si el interruptor está en "ON" (desbloqueado), salir inmediatamente.
+  // Esta es la clave del rendimiento.
+  if (isUnlocked === 'true') {
+    return;
+  }
+
+  // Si está bloqueado, revertir el cambio.
+  const range = e.range;
+  const oldValue = e.oldValue;
+  
+  // Mostrar notificación al usuario.
+  SpreadsheetApp.getActiveSpreadsheet().toast('El libro está bloqueado. Usa el menú para desbloquear.', 'Edición Bloqueada', 4);
+  
+  // Revertir la edición.
+  // Este bloque se ejecuta DESPUÉS de la notificación para una mejor experiencia.
+  if (typeof oldValue !== 'undefined') {
+    range.setValue(oldValue);
+  } else {
+    // Para ediciones masivas (pegar/borrar), donde oldValue es undefined,
+    // la acción más segura es limpiar el contenido.
+    range.clearContent();
+  }
+}
 
 /**
  * Se ejecuta cuando se abre la hoja de cálculo.
- * Bloquea automáticamente todo el libro y crea el menú personalizado "ASISPLUS".
+ * Bloquea automáticamente el libro y crea el menú personalizado "ASISPLUS".
  */
 function onOpen() {
-  // Tarea 3: Bloqueo Automático de Seguridad al abrir el archivo.
-  // Se invoca con 'false' para que no muestre la notificación "Libro bloqueado" cada vez.
-  bloquearLibroEntero(false); 
+  // Asegura que el estado por defecto al abrir sea siempre "bloqueado".
+  CacheService.getUserCache().remove(CACHE_KEY_DESBLOQUEO);
 
   const ui = SpreadsheetApp.getUi();
   const ownerEmail = SpreadsheetApp.getActiveSpreadsheet().getOwner().getEmail();
@@ -25,50 +63,30 @@ function onOpen() {
 
   // El menú completo solo es visible para el propietario
   if (currentUserEmail === ownerEmail) {
-    // Tarea 4: Actualizar el Menú de Usuario
     ui.createMenu('ASISPLUS')
       .addItem('Configurar Sistema', 'configurarEntornoCompleto')
       .addSeparator()
       .addItem('Administrar Credenciales MP', 'mostrarAdminCredenciales')
       .addSeparator()
       .addItem('1. Configurar Contraseña para Edición', 'configurarContrasenaEdicion')
-      .addItem('2. Desbloquear Libro para Edición', 'desbloquearLibroEntero')
-      .addItem('3. Bloquear Libro', 'bloquearLibroEntero')
+      .addItem('2. Desbloquear Libro para Edición', 'desbloquearLibro')
+      .addItem('3. Bloquear Libro', 'bloquearLibro')
       .addToUi();
   }
 }
 
 /**
- * Tarea 2 (NUEVA): Bloquea todas las hojas del libro usando protección nativa.
- * @param {boolean} [invocadoManualmente=true] - Para controlar si se muestra la notificación.
+ * Pone el "interruptor" en "OFF", bloqueando las ediciones manuales.
  */
-function bloquearLibroEntero(invocadoManualmente = true) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const hojas = ss.getSheets();
-  const yo = Session.getEffectiveUser();
-
-  hojas.forEach(hoja => {
-    try {
-      const proteccion = hoja.protect().setDescription('Protección del sistema ASISPLUS');
-      // Asegura que solo el propietario pueda editar la hoja mientras está protegida.
-      // Esto es crucial para que los scripts puedan seguir funcionando.
-      proteccion.removeEditors(proteccion.getEditors());
-      // Línea eliminada: proteccion.addEditor(yo);
-    } catch (e) {
-      Logger.log(`No se pudo proteger la hoja '${hoja.getName()}'. Es posible que ya tenga una protección incompatible. Error: ${e.message}`);
-    }
-  });
-
-  if (invocadoManualmente) {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Todas las hojas han sido bloqueadas.', 'Sistema Seguro', 5);
-  }
-  Logger.log('Sistema bloqueado. Todas las hojas protegidas.');
+function bloquearLibro() {
+  CacheService.getUserCache().remove(CACHE_KEY_DESBLOQUEO);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Libro bloqueado. Las ediciones manuales están deshabilitadas.', 'Sistema Seguro', 5);
 }
 
 /**
- * Tarea 2 (NUEVA): Desbloquea todas las hojas del libro pidiendo una contraseña.
+ * Pone el "interruptor" en "ON", permitiendo las ediciones manuales.
  */
-function desbloquearLibroEntero() {
+function desbloquearLibro() {
   const ui = SpreadsheetApp.getUi();
   const storedPassword = PropertiesService.getScriptProperties().getProperty(NOMBRE_PROPIEDAD_CONTRASENA);
 
@@ -79,28 +97,16 @@ function desbloquearLibroEntero() {
 
   const result = ui.prompt(
     'Desbloquear Libro Completo',
-    'Por favor, ingrese la contraseña para habilitar la edición en todas las hojas:',
+    'Por favor, ingrese la contraseña para habilitar la edición manual:',
     ui.ButtonSet.OK_CANCEL
   );
 
   if (result.getSelectedButton() === ui.Button.OK) {
     const password = result.getResponseText().trim();
     if (password === storedPassword) {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const hojas = ss.getSheets();
-
-      hojas.forEach(hoja => {
-        try {
-          const proteccion = hoja.getProtections(SpreadsheetApp.ProtectionType.SHEET)[0];
-          if (proteccion && proteccion.canEdit()) {
-            proteccion.remove();
-          }
-        } catch (e) {
-          Logger.log(`No se pudo desproteger la hoja '${hoja.getName()}'. Error: ${e.message}`);
-        }
-      });
-      ui.alert('Éxito', 'Todas las hojas han sido desbloqueadas para edición.', ui.ButtonSet.OK);
-      Logger.log('Sistema desbloqueado. Todas las hojas desprotegidas.');
+      const cache = CacheService.getUserCache();
+      cache.put(CACHE_KEY_DESBLOQUEO, 'true', DURACION_DESBLOQUEO_SEGUNDOS);
+      ui.alert('Éxito', `El libro ha sido desbloqueado para edición manual por ${DURACION_DESBLOQUEO_SEGUNDOS / 60} minutos.`, ui.ButtonSet.OK);
     } else {
       ui.alert('Error', 'Contraseña incorrecta.', ui.ButtonSet.OK);
     }
@@ -138,7 +144,7 @@ function configurarEntornoCompleto() {
     // 4. Configurar elementos de seguridad básicos
     configurarSeguridadBasica();
 
-    // 5. Crear la hoja de TRAMA GRUPALES (MODIFICACIÓN ACORDADA)
+    // 5. Crear la hoja de TRAMA GRUPALES
     _crearHojaTramaGrupales();
     
     ui.alert(
@@ -314,16 +320,6 @@ function configurarEntornoBase() {
         }
       }
     }
-
-    // Tarea 1: Aplicar protección a cada hoja creada o verificada.
-    try {
-      const proteccion = hoja.protect().setDescription('Protección del sistema ASISPLUS');
-      proteccion.removeEditors(proteccion.getEditors());
-      // Línea eliminada: proteccion.addEditor(Session.getEffectiveUser());
-      Logger.log(`Hoja "${nombreHoja}" protegida automáticamente.`);
-    } catch (e) {
-      Logger.log(`No se pudo proteger automáticamente la hoja '${nombreHoja}'. Error: ${e.message}`);
-    }
   }
 
   // 4. Insertar datos iniciales
@@ -408,7 +404,6 @@ function insertarDatosIniciales(ss) {
   }
   
   // Crear entrada en PropertiesService para las credenciales de Mercado Pago
-  // (En lugar de utilizar la hoja MERCADO_PAGO por razones de seguridad)
   try {
     // Crear referencias seguras a las credenciales
     const scriptProperties = PropertiesService.getScriptProperties();
@@ -634,9 +629,6 @@ function obtenerLetraColumna(indiceColumna) {
  */
 function configurarSeguridadBasica() {
   try {
-    // Tarea 1 (Limpieza): Se elimina la protección de hojas desde esta función.
-    // La protección ahora se maneja globalmente en configurarEntornoBase().
-    
     const scriptProperties = PropertiesService.getScriptProperties();
     const funcionGeneracionID = `
     /**
@@ -654,7 +646,6 @@ function configurarSeguridadBasica() {
     scriptProperties.setProperty("FUNCION_GENERACION_ID", funcionGeneracionID);
     
     // Crear indicador de servicio para credenciales seguras
-    // (Este el reemplazo seguro para la hoja MERCADO_PAGO)
     scriptProperties.setProperty("MP_CREDENTIALS_SERVICE_ACTIVE", "TRUE");
     
     Logger.log("Configuración de seguridad básica completada.");
@@ -1061,15 +1052,7 @@ function _crearHojaTramaGrupales() {
     sheet.appendRow(headers);
     formatearEncabezados(sheet, headers.length);
     
-    // Tarea 1: Asegurar que esta hoja también se proteja al crearse
-    try {
-      const proteccion = sheet.protect().setDescription('Protección del sistema ASISPLUS');
-      proteccion.removeEditors(proteccion.getEditors());
-      // Línea eliminada: proteccion.addEditor(Session.getEffectiveUser());
-      Logger.log(`Hoja '${sheetName}' creada y protegida.`);
-    } catch (e) {
-      Logger.log(`No se pudo proteger automáticamente la hoja '${sheetName}'. Error: ${e.message}`);
-    }
+    Logger.log(`Hoja '${sheetName}' creada y configurada.`);
   } else {
     Logger.log(`Hoja '${sheetName}' ya existe.`);
   }
