@@ -925,3 +925,170 @@ function isHojaDesbloqueada(hoja) {
   const desbloqueadaPara = CacheService.getScriptCache().get(`HOJA_DESBLOQUEADA_${hoja.getSheetId()}`);
   return desbloqueadaPara === currentUserEmail;
 }
+/**
+ * Constante que define el nombre de la hoja de TRAMA.
+ */
+const TRAMA_SHEET_NAME = 'TRAMA GRUPALES';
+
+/**
+ * Constante que define los 17 encabezados para la hoja de TRAMA GRUPALES.
+ * Esta es la estructura final acordada.
+ */
+const TRAMA_HEADERS = [
+  'PAIS', 'TIPO DE TRAMA', 'GF SAP', 'CERTFICADO', 'APELLIDO PATERNO', 'APELLIDO MATERNO',
+  'NOMBRE 1', 'NOMBRE 2', 'SEXO', 'FECHA DE NACIMIENTO DD/MM/AAAA', 'PARENTESCO',
+  'TIPO DE DOCUMENTO', 'NUMERO DE DOCUMENTO', 'DIRECCION DE EMPRESA',
+  'CORREO DE CONTACTO DE LA EMPRESA', 'PROGRAMA', 'INICIO/FIN VIGENCIA'
+];
+
+/**
+ * Orquesta la creación del registro en la hoja de TRAMA GRUPALES.
+ * Esta es la función principal que se llamará después de un registro exitoso.
+ * @param {object} datosFormulario El objeto JSON con los datos del titular y dependientes.
+ */
+function generarRegistroTrama(datosFormulario) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let targetSheet = ss.getSheetByName(TRAMA_SHEET_NAME);
+
+    // Si la hoja no existe, la crea en la primera posición y añade los encabezados.
+    if (!targetSheet) {
+      targetSheet = ss.insertSheet(TRAMA_SHEET_NAME, 0); // El índice 0 la coloca al principio.
+      targetSheet.appendRow(TRAMA_HEADERS);
+      targetSheet.setFrozenRows(1);
+      console.log(`Hoja '${TRAMA_SHEET_NAME}' creada y configurada.`);
+    }
+
+    const newRows = _transformarDatosARows(datosFormulario);
+
+    // Escribir todas las filas en una sola operación para máxima eficiencia.
+    if (newRows.length > 0) {
+      const lastRow = targetSheet.getLastRow();
+      targetSheet.getRange(lastRow + 1, 1, newRows.length, TRAMA_HEADERS.length).setValues(newRows);
+      console.log(`Se han añadido ${newRows.length} filas a la hoja '${TRAMA_SHEET_NAME}'.`);
+    }
+
+  } catch (error) {
+    console.error(`Error en generarRegistroTrama: ${error.toString()}`);
+    // Considerar registrar el error en la hoja 'LOGS'.
+  }
+}
+
+/**
+ * Función auxiliar privada para transformar el objeto de datos del formulario a un array de filas para la Trama.
+ * @param {object} datosFormulario El objeto de la persona a procesar (puede ser titular o dependiente).
+ * @returns {Array<Array<any>>} Un array de arrays, donde cada array interno representa una fila.
+ * @private
+ */
+function _transformarDatosARows(datosFormulario) {
+  const rows = [];
+  const titular = datosFormulario.titular;
+  const dependientes = datosFormulario.dependientes || [];
+
+  // Valores que son comunes a todas las filas de este registro.
+  const certificado = titular.numeroDocumento;
+  const inicioVigencia = _getInicioVigencia();
+
+  // Mapeo de parentescos de texto a los códigos numéricos requeridos.
+  const parentescoMap = {
+    'TITULAR': '01',
+    'CONYUGE': '02',
+    'PADRE': '03', // Asumiendo 'PADRE' como texto de entrada
+    'MADRE': '03', // Asumiendo 'MADRE' como texto de entrada
+    'HIJO': '04',
+    'HIJA': '04'
+  };
+
+  // 1. Procesar la fila del Titular
+  const titularRow = [
+    'PER', // PAIS (Fijo)
+    'ALTA', // TIPO DE TRAMA (Fijo)
+    '', // GF SAP (Vacío)
+    certificado, // CERTFICADO (DNI del titular)
+    titular.apellidoPaterno, // APELLIDO PATERNO
+    titular.apellidoMaterno, // APELLIDO MATERNO
+    titular.nombre1, // NOMBRE 1 (Asume que el formulario envía nombre1 y nombre2)
+    titular.nombre2 || '', // NOMBRE 2 (Si no existe, se deja vacío)
+    titular.genero, // SEXO
+    titular.fechaNacimiento, // FECHA DE NACIMIENTO
+    parentescoMap['TITULAR'], // PARENTESCO (Código Fijo para titular)
+    '01', // TIPO DE DOCUMENTO (01: DNI, fijo por ahora)
+    titular.numeroDocumento, // NUMERO DE DOCUMENTO
+    'CALLE ALFREDO SALAZAR 145 MIRAFLORES', // DIRECCION DE EMPRESA (Fijo)
+    'GALVAREZ@ASEGUR.COM.PE', // CORREO DE CONTACTO DE LA EMPRESA (Fijo)
+    'PLUS', // PROGRAMA (Fijo)
+    inicioVigencia // INICIO/FIN VIGENCIA (Calculado)
+  ];
+  rows.push(titularRow);
+
+  // 2. Procesar las filas de los Dependientes
+  dependientes.forEach(dependiente => {
+    const dependienteRow = [
+      'PER',
+      'ALTA',
+      '',
+      certificado, // CERTFICADO se replica del titular.
+      dependiente.apellidoPaterno,
+      dependiente.apellidoMaterno,
+      dependiente.nombre1,
+      dependiente.nombre2 || '',
+      dependiente.genero,
+      dependiente.fechaNacimiento,
+      parentescoMap[dependiente.parentesco.toUpperCase()] || '', // PARENTESCO (Código mapeado)
+      '01',
+      dependiente.numeroDocumento,
+      'CALLE ALFREDO SALAZAR 145 MIRAFLORES',
+      'GALVAREZ@ASEGUR.COM.PE',
+      'PLUS',
+      inicioVigencia // INICIO/FIN VIGENCIA se replica del titular.
+    ];
+    rows.push(dependienteRow);
+  });
+
+  return rows;
+}
+
+/**
+ * Calcula el inicio de vigencia, que es el primer día del mes siguiente.
+ * @returns {Date} Un objeto Date representando el 1ro del próximo mes.
+ * @private
+ */
+function _getInicioVigencia() {
+  const hoy = new Date();
+  let anio = hoy.getFullYear();
+  let mes = hoy.getMonth(); // 0 (Ene) a 11 (Dic)
+
+  if (mes === 11) { // Si es Diciembre
+    mes = 0; // El mes será Enero
+    anio++; // del próximo año
+  } else {
+    mes++; // Simplemente el siguiente mes
+  }
+  return new Date(anio, mes, 1);
+}
+
+/**
+ * Verifica si la hoja TRAMA GRUPALES existe y, si no, la crea y configura.
+ * @private
+ */
+function _crearHojaTramaGrupales() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetName = 'TRAMA GRUPALES';
+  let sheet = ss.getSheetByName(sheetName);
+
+  if (!sheet) {
+    const headers = [
+      'PAIS', 'TIPO DE TRAMA', 'GF SAP', 'CERTFICADO', 'APELLIDO PATERNO', 'APELLIDO MATERNO',
+      'NOMBRE 1', 'NOMBRE 2', 'SEXO', 'FECHA DE NACIMIENTO DD/MM/AAAA', 'PARENTESCO',
+      'TIPO DE DOCUMENTO', 'NUMERO DE DOCUMENTO', 'DIRECCION DE EMPRESA',
+      'CORREO DE CONTACTO DE LA EMPRESA', 'PROGRAMA', 'INICIO/FIN VIGENCIA'
+    ];
+    
+    // El índice 0 asegura que se cree como la primera pestaña
+    sheet = ss.insertSheet(sheetName, 0); 
+    sheet.appendRow(headers).setFrozenRows(1);
+    Logger.log(`Hoja '${sheetName}' creada y configurada.`);
+  } else {
+    Logger.log(`Hoja '${sheetName}' ya existe.`);
+  }
+}
