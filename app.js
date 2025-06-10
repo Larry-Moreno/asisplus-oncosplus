@@ -3,36 +3,107 @@
  * ---------------------------------------------------
  * Este script crea y gestiona la estructura completa del sistema,
  * incluyendo la configuración del entorno, menús personalizados,
- * protección de hojas con desbloqueo temporal, y formatos.
+ * y un sistema de seguridad de protección global para todas las hojas.
  *
- * Basado en app.gs-VGEM.F1-828 lineas.txt e integrando nuevas funcionalidades.
- * Proyecto ASISPLUS-ONCOPLUS (Mayo 2025)
+ * Versión con nuevo sistema de seguridad (Junio 2025)
  */
 
-const HOJA_DESBLOQUEADA_CACHE_KEY_PREFIX = 'hojaDesbloqueada_';
-const DESBLOQUEO_TIMEOUT_SECONDS = 30 * 60; // 30 minutos para el timeout de desbloqueo
 const NOMBRE_PROPIEDAD_CONTRASENA = 'editorPropietarioPassword';
 
 /**
  * Se ejecuta cuando se abre la hoja de cálculo.
- * Crea el menú personalizado "ASISPLUS".
+ * Bloquea automáticamente todo el libro y crea el menú personalizado "ASISPLUS".
  */
 function onOpen() {
+  // Tarea 3: Bloqueo Automático de Seguridad al abrir el archivo.
+  // Se invoca con 'false' para que no muestre la notificación "Libro bloqueado" cada vez.
+  bloquearLibroEntero(false); 
+
   const ui = SpreadsheetApp.getUi();
   const ownerEmail = SpreadsheetApp.getActiveSpreadsheet().getOwner().getEmail();
   const currentUserEmail = Session.getEffectiveUser().getEmail();
 
   // El menú completo solo es visible para el propietario
   if (currentUserEmail === ownerEmail) {
+    // Tarea 4: Actualizar el Menú de Usuario
     ui.createMenu('ASISPLUS')
       .addItem('Configurar Sistema', 'configurarEntornoCompleto')
       .addSeparator()
       .addItem('Administrar Credenciales MP', 'mostrarAdminCredenciales')
       .addSeparator()
       .addItem('1. Configurar Contraseña para Edición', 'configurarContrasenaEdicion')
-      .addItem('2. Desbloquear Hoja Activa para Edición', 'desbloquearHojaActivaParaEdicion')
-      .addItem('3. Bloquear Hoja Activa', 'bloquearHojaActiva')
+      .addItem('2. Desbloquear Libro para Edición', 'desbloquearLibroEntero')
+      .addItem('3. Bloquear Libro', 'bloquearLibroEntero')
       .addToUi();
+  }
+}
+
+/**
+ * Tarea 2 (NUEVA): Bloquea todas las hojas del libro usando protección nativa.
+ * @param {boolean} [invocadoManualmente=true] - Para controlar si se muestra la notificación.
+ */
+function bloquearLibroEntero(invocadoManualmente = true) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hojas = ss.getSheets();
+  const yo = Session.getEffectiveUser();
+
+  hojas.forEach(hoja => {
+    try {
+      const proteccion = hoja.protect().setDescription('Protección del sistema ASISPLUS');
+      // Asegura que solo el propietario pueda editar la hoja mientras está protegida.
+      // Esto es crucial para que los scripts puedan seguir funcionando.
+      proteccion.removeEditors(proteccion.getEditors());
+      // Línea eliminada: proteccion.addEditor(yo);
+    } catch (e) {
+      Logger.log(`No se pudo proteger la hoja '${hoja.getName()}'. Es posible que ya tenga una protección incompatible. Error: ${e.message}`);
+    }
+  });
+
+  if (invocadoManualmente) {
+    SpreadsheetApp.getActiveSpreadsheet().toast('Todas las hojas han sido bloqueadas.', 'Sistema Seguro', 5);
+  }
+  Logger.log('Sistema bloqueado. Todas las hojas protegidas.');
+}
+
+/**
+ * Tarea 2 (NUEVA): Desbloquea todas las hojas del libro pidiendo una contraseña.
+ */
+function desbloquearLibroEntero() {
+  const ui = SpreadsheetApp.getUi();
+  const storedPassword = PropertiesService.getScriptProperties().getProperty(NOMBRE_PROPIEDAD_CONTRASENA);
+
+  if (!storedPassword) {
+    ui.alert('Error', 'Primero debe configurar una contraseña desde el menú ASISPLUS.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const result = ui.prompt(
+    'Desbloquear Libro Completo',
+    'Por favor, ingrese la contraseña para habilitar la edición en todas las hojas:',
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (result.getSelectedButton() === ui.Button.OK) {
+    const password = result.getResponseText().trim();
+    if (password === storedPassword) {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const hojas = ss.getSheets();
+
+      hojas.forEach(hoja => {
+        try {
+          const proteccion = hoja.getProtections(SpreadsheetApp.ProtectionType.SHEET)[0];
+          if (proteccion && proteccion.canEdit()) {
+            proteccion.remove();
+          }
+        } catch (e) {
+          Logger.log(`No se pudo desproteger la hoja '${hoja.getName()}'. Error: ${e.message}`);
+        }
+      });
+      ui.alert('Éxito', 'Todas las hojas han sido desbloqueadas para edición.', ui.ButtonSet.OK);
+      Logger.log('Sistema desbloqueado. Todas las hojas desprotegidas.');
+    } else {
+      ui.alert('Error', 'Contraseña incorrecta.', ui.ButtonSet.OK);
+    }
   }
 }
 
@@ -140,7 +211,6 @@ function configurarEntornoBase() {
     ]
   };
 
-
   // 2. Comprobar y eliminar las hojas por defecto
   const hojasDefault = ['Hoja1', 'Hoja 1', 'Sheet1', 'Sheet 1'];
   
@@ -185,65 +255,74 @@ function configurarEntornoBase() {
         hoja.autoResizeColumn(i);
       }
     } else {
-
       // Si la hoja ya existe y es COSTOS, no tocar sus datos
       if (nombreHoja === "COSTOS") {
-      Logger.log(`Hoja "${nombreHoja}" ya existe. Se conservan sus datos actuales.`);
-      
-      // Solo formatear encabezados si es necesario
-      const primeraFila = hoja.getRange(1, 1, 1, columnas.length).getValues()[0];
-      const primeraFilaVacia = primeraFila.every(cell => cell === "");
-      
-      if (primeraFilaVacia) {
-        hoja.getRange(1, 1, 1, columnas.length).setValues([columnas]);
-        formatearEncabezados(hoja, columnas.length);
-      }
-      }
-      
-      // Si la hoja ya existe, verificar si está vacía
-      const primeraFila = hoja.getRange(1, 1, 1, columnas.length).getValues()[0];
-      const primeraFilaVacia = primeraFila.every(cell => cell === "");
-      
-      if (primeraFilaVacia) {
-        // Si la primera fila está vacía, añadir encabezados
-        hoja.clearContents();
-        hoja.appendRow(columnas);
-        Logger.log(`Encabezados añadidos a hoja existente vacía "${nombreHoja}".`);
-        formatearEncabezados(hoja, columnas.length);
+        Logger.log(`Hoja "${nombreHoja}" ya existe. Se conservan sus datos actuales.`);
         
-        // Establecer ancho de columnas automático
-        for (let i = 1; i <= columnas.length; i++) {
-          hoja.autoResizeColumn(i);
+        // Solo formatear encabezados si es necesario
+        const primeraFila = hoja.getRange(1, 1, 1, columnas.length).getValues()[0];
+        const primeraFilaVacia = primeraFila.every(cell => cell === "");
+        
+        if (primeraFilaVacia) {
+          hoja.getRange(1, 1, 1, columnas.length).setValues([columnas]);
+          formatearEncabezados(hoja, columnas.length);
         }
       } else {
-        // Si la hoja ya tiene contenido, verificar si los encabezados coinciden
-        let encabezadosCoinciden = true;
-        for (let i = 0; i < columnas.length; i++) {
-          if (i < primeraFila.length && primeraFila[i] !== columnas[i]) {
-            encabezadosCoinciden = false;
-            break;
-          }
-        }
+        // Si la hoja ya existe, verificar si está vacía
+        const primeraFila = hoja.getRange(1, 1, 1, columnas.length).getValues()[0];
+        const primeraFilaVacia = primeraFila.every(cell => cell === "");
         
-        if (!encabezadosCoinciden) {
-          // Si los encabezados no coinciden, crear una nueva hoja con el nombre correcto
-          const nuevoNombre = `${nombreHoja}_NUEVO`;
-          const nuevaHoja = ss.insertSheet(nuevoNombre);
-          nuevaHoja.appendRow(columnas);
-          formatearEncabezados(nuevaHoja, columnas.length);
+        if (primeraFilaVacia) {
+          // Si la primera fila está vacía, añadir encabezados
+          hoja.clearContents();
+          hoja.appendRow(columnas);
+          Logger.log(`Encabezados añadidos a hoja existente vacía "${nombreHoja}".`);
+          formatearEncabezados(hoja, columnas.length);
           
           // Establecer ancho de columnas automático
           for (let i = 1; i <= columnas.length; i++) {
-            nuevaHoja.autoResizeColumn(i);
+            hoja.autoResizeColumn(i);
+          }
+        } else {
+          // Si la hoja ya tiene contenido, verificar si los encabezados coinciden
+          let encabezadosCoinciden = true;
+          for (let i = 0; i < columnas.length; i++) {
+            if (i < primeraFila.length && primeraFila[i] !== columnas[i]) {
+              encabezadosCoinciden = false;
+              break;
+            }
           }
           
-          Logger.log(`Hoja existente "${nombreHoja}" tiene estructura diferente. Se creó una nueva hoja "${nuevoNombre}" con la estructura correcta.`);
-        } else {
-          // Si los encabezados coinciden, asegurarse de que estén formateados
-          formatearEncabezados(hoja, columnas.length);
-          Logger.log(`Hoja "${nombreHoja}" ya existe con la estructura correcta.`);
+          if (!encabezadosCoinciden) {
+            // Si los encabezados no coinciden, crear una nueva hoja con el nombre correcto
+            const nuevoNombre = `${nombreHoja}_NUEVO`;
+            const nuevaHoja = ss.insertSheet(nuevoNombre);
+            nuevaHoja.appendRow(columnas);
+            formatearEncabezados(nuevaHoja, columnas.length);
+            
+            // Establecer ancho de columnas automático
+            for (let i = 1; i <= columnas.length; i++) {
+              nuevaHoja.autoResizeColumn(i);
+            }
+            
+            Logger.log(`Hoja existente "${nombreHoja}" tiene estructura diferente. Se creó una nueva hoja "${nuevoNombre}" con la estructura correcta.`);
+          } else {
+            // Si los encabezados coinciden, asegurarse de que estén formateados
+            formatearEncabezados(hoja, columnas.length);
+            Logger.log(`Hoja "${nombreHoja}" ya existe con la estructura correcta.`);
+          }
         }
       }
+    }
+
+    // Tarea 1: Aplicar protección a cada hoja creada o verificada.
+    try {
+      const proteccion = hoja.protect().setDescription('Protección del sistema ASISPLUS');
+      proteccion.removeEditors(proteccion.getEditors());
+      // Línea eliminada: proteccion.addEditor(Session.getEffectiveUser());
+      Logger.log(`Hoja "${nombreHoja}" protegida automáticamente.`);
+    } catch (e) {
+      Logger.log(`No se pudo proteger automáticamente la hoja '${nombreHoja}'. Error: ${e.message}`);
     }
   }
 
@@ -554,38 +633,10 @@ function obtenerLetraColumna(indiceColumna) {
  * Configura elementos básicos de seguridad y protección de datos
  */
 function configurarSeguridadBasica() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  
   try {
-    // 1. Proteger hojas críticas
-    const hojaCostos = ss.getSheetByName("COSTOS");
-    const hojaInformacion = ss.getSheetByName("INFORMACIÓN");
+    // Tarea 1 (Limpieza): Se elimina la protección de hojas desde esta función.
+    // La protección ahora se maneja globalmente en configurarEntornoBase().
     
-    // Función para proteger una hoja pero permitir edición al propietario
-    function protegerHoja(hoja, descripcion) {
-      if (!hoja) return;
-      
-      const proteccion = hoja.protect().setDescription(descripcion);
-      
-      // Asegurarse que el propietario actual pueda editar
-      const yo = Session.getEffectiveUser();
-      proteccion.addEditor(yo);
-      
-      // Remover todos los otros editores para asegurar que solo el propietario pueda editar
-      const editores = proteccion.getEditors();
-      editores.forEach(function(editor) {
-        if (editor.getEmail() !== yo.getEmail()) {
-          proteccion.removeEditor(editor);
-        }
-      });
-      
-      Logger.log(`Protección aplicada a la hoja: ${hoja.getName()}`);
-    }
-    
-    protegerHoja(hojaCostos, "Protección de tarifas del sistema");
-    protegerHoja(hojaInformacion, "Protección de información del sistema");
-    
-    // 2. Crear función para generación de IDs únicos y almacenarla en propiedades
     const scriptProperties = PropertiesService.getScriptProperties();
     const funcionGeneracionID = `
     /**
@@ -602,7 +653,7 @@ function configurarSeguridadBasica() {
     
     scriptProperties.setProperty("FUNCION_GENERACION_ID", funcionGeneracionID);
     
-    // 3. Crear indicador de servicio para credenciales seguras
+    // Crear indicador de servicio para credenciales seguras
     // (Este el reemplazo seguro para la hoja MERCADO_PAGO)
     scriptProperties.setProperty("MP_CREDENTIALS_SERVICE_ACTIVE", "TRUE");
     
@@ -666,161 +717,156 @@ function recuperarCredencialSegura(tipo) {
     Logger.log(`Credencial de tipo '${tipo}' recuperada correctamente.`);
     
     return valorDescifrado;
-} catch (error) {
-   Logger.log(`ERROR al recuperar credencial: ${error.message}`);
-   return null;
- }
+  } catch (error) {
+    Logger.log(`ERROR al recuperar credencial: ${error.message}`);
+    return null;
+  }
 }
 
 /**
-* Función interna para cifrado (implementación simplificada)
-* En producción, usar una implementación más robusta
-*/
+ * Función interna para cifrado (implementación simplificada)
+ * En producción, usar una implementación más robusta
+ */
 function cifrarValor(valor) {
- // Esta es una implementación simulada para desarrollo
- // En producción, implementar cifrado real AES-256
- return `encrypted_${valor}_${Date.now()}`;
+  // Esta es una implementación simulada para desarrollo
+  // En producción, implementar cifrado real AES-256
+  return `encrypted_${valor}_${Date.now()}`;
 }
 
 /**
-* Función interna para descifrado (implementación simplificada)
-* En producción, usar una implementación más robusta
-*/
+ * Función interna para descifrado (implementación simplificada)
+ * En producción, usar una implementación más robusta
+ */
 function descifrarValor(valorCifrado) {
- // Esta es una implementación simulada para desarrollo
- // En producción, implementar descifrado real AES-256
- if (!valorCifrado || !valorCifrado.startsWith('encrypted_')) {
-   return null;
- }
- 
- // Extraer valor original (simulado)
- const match = valorCifrado.match(/encrypted_(.+)_\d+/);
- return match ? match[1] : null;
+  // Esta es una implementación simulada para desarrollo
+  // En producción, implementar descifrado real AES-256
+  if (!valorCifrado || !valorCifrado.startsWith('encrypted_')) {
+    return null;
+  }
+  
+  // Extraer valor original (simulado)
+  const match = valorCifrado.match(/encrypted_(.+)_\d+/);
+  return match ? match[1] : null;
 }
 
 /**
-* Configuración del formulario de administración de credenciales
-* Esta función crea una interfaz de usuario para gestionar credenciales
-* de manera segura, reemplazando la hoja MERCADO_PAGO que exponía tokens
-*/
+ * Configuración del formulario de administración de credenciales
+ * Esta función crea una interfaz de usuario para gestionar credenciales
+ * de manera segura, reemplazando la hoja MERCADO_PAGO que exponía tokens
+ */
 function mostrarAdminCredenciales() {
- const ui = SpreadsheetApp.getUi();
- 
- // Crear HTML para el formulario de administración
- const htmlOutput = HtmlService.createHtmlOutput(`
-   <style>
-     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
-     h2 { color: #D95B43; } /* Terracota ASISPLUS */
-     .form-group { margin-bottom: 15px; }
-     label { display: block; margin-bottom: 5px; font-weight: bold; }
-     input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; }
-     .buttons { margin-top: 20px; }
-     .btn { padding: 8px 16px; margin-right: 10px; cursor: pointer; }
-     .btn-primary { background-color: #D95B43; color: white; border: none; }
-     .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
-     .alert-info { background-color: #d9edf7; border: 1px solid #bce8f1; color: #31708f; }
-   </style>
-   
-   <h2>Administración de Credenciales ASISPLUS-ONCOPLUS</h2>
-   
-   <div class="alert alert-info">
-     <strong>Importante:</strong> Las credenciales se almacenarán de forma segura en el sistema.
-     No se guardarán en hojas visibles para proteger la información sensible.
-   </div>
-   
-   <form id="credentialsForm">
-     <div class="form-group">
-       <label for="publicKey">Public Key (Mercado Pago):</label>
-       <input type="text" id="publicKey" name="publicKey" placeholder="Ingresa la Public Key">
-     </div>
-     
-     <div class="form-group">
-       <label for="accessToken">Access Token (Mercado Pago):</label>
-       <input type="text" id="accessToken" name="accessToken" placeholder="Ingresa el Access Token">
-     </div>
-     
-     <div class="buttons">
-       <button type="submit" class="btn btn-primary">Guardar</button>
-       <button type="button" class="btn" onclick="google.script.host.close()">Cancelar</button>
-     </div>
-   </form>
-   
-   <script>
-     // Enviar datos al servidor cuando se envía el formulario
-     document.getElementById('credentialsForm').addEventListener('submit', function(e) {
-       e.preventDefault();
-       
-       // Recopilar datos del formulario
-       var publicKey = document.getElementById('publicKey').value.trim();
-       var accessToken = document.getElementById('accessToken').value.trim();
-       
-       // Validar que ambos campos tengan valores
-       if (!publicKey || !accessToken) {
-         alert('Por favor, completa ambos campos.');
-         return;
-       }
-       
-       // Enviar datos al servidor (Apps Script)
-       google.script.run
-         .withSuccessHandler(function(result) {
-           alert('¡Credenciales guardadas correctamente!');
-           google.script.host.close();
-         })
-         .withFailureHandler(function(error) {
-           alert('Error al guardar credenciales: ' + error);
-         })
-         .guardarCredencialesMercadoPago(publicKey, accessToken);
-     });
-   </script>
- `)
- .setWidth(500)
- .setHeight(400)
- .setTitle('Administración de Credenciales');
- 
- // Mostrar el diálogo
- ui.showModalDialog(htmlOutput, 'Credenciales ASISPLUS-ONCOPLUS');
+  const ui = SpreadsheetApp.getUi();
+  
+  // Crear HTML para el formulario de administración
+  const htmlOutput = HtmlService.createHtmlOutput(`
+    <style>
+      body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+      h2 { color: #D95B43; } /* Terracota ASISPLUS */
+      .form-group { margin-bottom: 15px; }
+      label { display: block; margin-bottom: 5px; font-weight: bold; }
+      input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; }
+      .buttons { margin-top: 20px; }
+      .btn { padding: 8px 16px; margin-right: 10px; cursor: pointer; }
+      .btn-primary { background-color: #D95B43; color: white; border: none; }
+      .alert { padding: 10px; margin-bottom: 15px; border-radius: 4px; }
+      .alert-info { background-color: #d9edf7; border: 1px solid #bce8f1; color: #31708f; }
+    </style>
+    
+    <h2>Administración de Credenciales ASISPLUS-ONCOPLUS</h2>
+    
+    <div class="alert alert-info">
+      <strong>Importante:</strong> Las credenciales se almacenarán de forma segura en el sistema.
+      No se guardarán en hojas visibles para proteger la información sensible.
+    </div>
+    
+    <form id="credentialsForm">
+      <div class="form-group">
+        <label for="publicKey">Public Key (Mercado Pago):</label>
+        <input type="text" id="publicKey" name="publicKey" placeholder="Ingresa la Public Key">
+      </div>
+      
+      <div class="form-group">
+        <label for="accessToken">Access Token (Mercado Pago):</label>
+        <input type="text" id="accessToken" name="accessToken" placeholder="Ingresa el Access Token">
+      </div>
+      
+      <div class="buttons">
+        <button type="submit" class="btn btn-primary">Guardar</button>
+        <button type="button" class="btn" onclick="google.script.host.close()">Cancelar</button>
+      </div>
+    </form>
+    
+    <script>
+      // Enviar datos al servidor cuando se envía el formulario
+      document.getElementById('credentialsForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Recopilar datos del formulario
+        var publicKey = document.getElementById('publicKey').value.trim();
+        var accessToken = document.getElementById('accessToken').value.trim();
+        
+        // Validar que ambos campos tengan valores
+        if (!publicKey || !accessToken) {
+          alert('Por favor, completa ambos campos.');
+          return;
+        }
+        
+        // Enviar datos al servidor (Apps Script)
+        google.script.run
+          .withSuccessHandler(function(result) {
+            alert('¡Credenciales guardadas correctamente!');
+            google.script.host.close();
+          })
+          .withFailureHandler(function(error) {
+            alert('Error al guardar credenciales: ' + error);
+          })
+          .guardarCredencialesMercadoPago(publicKey, accessToken);
+      });
+    </script>
+  `)
+  .setWidth(500)
+  .setHeight(400)
+  .setTitle('Administración de Credenciales');
+  
+  // Mostrar el diálogo
+  ui.showModalDialog(htmlOutput, 'Credenciales ASISPLUS-ONCOPLUS');
 }
 
 /**
-* Función para guardar credenciales desde el formulario de administración
-* Esta función es llamada por el frontend
-*/
+ * Función para guardar credenciales desde el formulario de administración
+ * Esta función es llamada por el frontend
+ */
 function guardarCredencialesMercadoPago(publicKey, accessToken) {
- try {
-   // Almacenar ambas credenciales de forma segura
-   const pk = almacenarCredencialSegura('Public Key', publicKey);
-   const at = almacenarCredencialSegura('Access Token', accessToken);
-   
-   // Actualizar status en las propiedades del script
-   const scriptProperties = PropertiesService.getScriptProperties();
-   scriptProperties.setProperty("MP_CREDENTIALS_SETUP", "TRUE");
-   scriptProperties.setProperty("MP_CREDENTIALS_LAST_UPDATED", new Date().toISOString());
-   
-   // Registrar en LOGS
-   const hojaLogs = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("LOGS");
-   if (hojaLogs) {
-     hojaLogs.appendRow([
-       "LOG" + new Date().getTime().toString().substring(5), 
-       new Date().toISOString(), 
-       "INFO", 
-       "SEGURIDAD", 
-       "Credenciales de Mercado Pago actualizadas", 
-       JSON.stringify({success: true, timestamp: new Date().toISOString()}), 
-       "Administración"
-     ]);
-   }
-   
-   return true;
- } catch (error) {
-   Logger.log(`ERROR en guardarCredencialesMercadoPago: ${error.toString()}`);
-   throw new Error(`No se pudieron guardar las credenciales: ${error.message}`);
- }
+  try {
+    // Almacenar ambas credenciales de forma segura
+    const pk = almacenarCredencialSegura('Public Key', publicKey);
+    const at = almacenarCredencialSegura('Access Token', accessToken);
+    
+    // Actualizar status en las propiedades del script
+    const scriptProperties = PropertiesService.getScriptProperties();
+    scriptProperties.setProperty("MP_CREDENTIALS_SETUP", "TRUE");
+    scriptProperties.setProperty("MP_CREDENTIALS_LAST_UPDATED", new Date().toISOString());
+    
+    // Registrar en LOGS
+    const hojaLogs = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("LOGS");
+    if (hojaLogs) {
+      hojaLogs.appendRow([
+        "LOG" + new Date().getTime().toString().substring(5), 
+        new Date().toISOString(), 
+        "INFO", 
+        "SEGURIDAD", 
+        "Credenciales de Mercado Pago actualizadas", 
+        JSON.stringify({success: true, timestamp: new Date().toISOString()}), 
+        "Administración"
+      ]);
+    }
+    
+    return true;
+  } catch (error) {
+    Logger.log(`ERROR en guardarCredencialesMercadoPago: ${error.toString()}`);
+    throw new Error(`No se pudieron guardar las credenciales: ${error.message}`);
+  }
 }
-
-/**
-* Función para administrar credenciales de la hoja de calculo
-* Esta función es llamada por ...
-*/
 
 /**
  * Configura la contraseña para edición de hojas
@@ -837,14 +883,14 @@ function configurarContrasenaEdicion() {
 
   const result = ui.prompt(
     'Configurar Contraseña',
-    'Por favor, ingrese la nueva contraseña para edición:',
+    'Por favor, ingrese la nueva contraseña para desbloquear el libro para edición:',
     ui.ButtonSet.OK_CANCEL
   );
 
   if (result.getSelectedButton() === ui.Button.OK) {
     const password = result.getResponseText().trim();
     if (password) {
-      PropertiesService.getScriptProperties().setProperty('EDITOR_PASSWORD', password);
+      PropertiesService.getScriptProperties().setProperty(NOMBRE_PROPIEDAD_CONTRASENA, password);
       ui.alert('Éxito', 'La contraseña ha sido actualizada.', ui.ButtonSet.OK);
     } else {
       ui.alert('Error', 'La contraseña no puede estar vacía.', ui.ButtonSet.OK);
@@ -852,82 +898,6 @@ function configurarContrasenaEdicion() {
   }
 }
 
-function onEdit(e) {  try {    const range = e.range;    const sheet = range.getSheet();    const sheetName = sheet.getName();    const oldValue = e.oldValue;    const currentUserEmail = Session.getEffectiveUser().getEmail();    const ownerEmail = SpreadsheetApp.getActiveSpreadsheet().getOwner().getEmail();    const hojasCriticasParaPropietario = ["TITULAR", "DEPENDIENTES", "COSTOS", "INFORMACIÓN", "MERCADO_PAGO_TRANSACCIONES", "LOGS"];    if (currentUserEmail === ownerEmail && hojasCriticasParaPropietario.includes(sheetName)) {      if (!isHojaDesbloqueada(sheet)) {        if (typeof oldValue !== 'undefined') {          range.setValue(oldValue);        } else {          range.clearContent();        }        SpreadsheetApp.getActiveSpreadsheet().toast(          `La hoja "${sheetName}" está protegida. Para editar, desbloquéala desde el menú ASISPLUS.`,          "Edición Revertida",          7        );        Logger.log(`Intento de edición en hoja protegida "${sheetName}" por propietario ${currentUserEmail}. Edición revertida.`);      } else {        Logger.log(`Edición permitida en hoja desbloqueada "${sheetName}" por propietario ${currentUserEmail}. Celda: ${range.getA1Notation()}`);      }    }  } catch (err) {    Logger.log(`Error en onEdit: ${err.message}`);  }}
-
-/**
- * Desbloquea la hoja activa para edición
- */
-function desbloquearHojaActivaParaEdicion() {
-  const ui = SpreadsheetApp.getUi();
-  const ownerEmail = SpreadsheetApp.getActiveSpreadsheet().getOwner().getEmail();
-  const currentUserEmail = Session.getEffectiveUser().getEmail();
-
-  // Solo el propietario puede desbloquear hojas
-  if (currentUserEmail !== ownerEmail) {
-    ui.alert('Error', 'Solo el propietario puede desbloquear hojas.', ui.ButtonSet.OK);
-    return;
-  }
-
-  const hoja = SpreadsheetApp.getActiveSheet();
-  const result = ui.prompt(
-    'Desbloquear Hoja',
-    `Por favor, ingrese la contraseña para desbloquear la hoja "${hoja.getName()}":`,
-    ui.ButtonSet.OK_CANCEL
-  );
-
-  if (result.getSelectedButton() === ui.Button.OK) {
-    const password = result.getResponseText().trim();
-    const storedPassword = PropertiesService.getScriptProperties().getProperty('EDITOR_PASSWORD');
-
-    if (password === storedPassword) {
-      // Desbloquear la hoja por 15 minutos
-      CacheService.getScriptCache().put(
-        `HOJA_DESBLOQUEADA_${hoja.getSheetId()}`,
-        currentUserEmail,
-        15 * 60 // 15 minutos en segundos
-      );
-      SpreadsheetApp.getActiveSpreadsheet().toast(
-        `La hoja "${hoja.getName()}" ha sido desbloqueada para edición por 15 minutos.`,
-        "Hoja Desbloqueada",
-        5
-      );
-    } else {
-      ui.alert('Error', 'Contraseña incorrecta.', ui.ButtonSet.OK);
-    }
-  }
-}
-
-/**
- * Bloquea la hoja activa
- */
-function bloquearHojaActiva() {
-  const ui = SpreadsheetApp.getUi();
-  const ownerEmail = SpreadsheetApp.getActiveSpreadsheet().getOwner().getEmail();
-  const currentUserEmail = Session.getEffectiveUser().getEmail();
-
-  // Solo el propietario puede bloquear hojas
-  if (currentUserEmail !== ownerEmail) {
-    ui.alert('Error', 'Solo el propietario puede bloquear hojas.', ui.ButtonSet.OK);
-    return;
-  }
-
-  const hoja = SpreadsheetApp.getActiveSheet();
-  CacheService.getScriptCache().remove(`HOJA_DESBLOQUEADA_${hoja.getSheetId()}`);
-  SpreadsheetApp.getActiveSpreadsheet().toast(
-    `La hoja "${hoja.getName()}" ha sido bloqueada.`,
-    "Hoja Bloqueada",
-    5
-  );
-}
-
-/**
- * Verifica si la hoja especificada está actualmente desbloqueada para el usuario activo.
- */
-function isHojaDesbloqueada(hoja) {
-  const currentUserEmail = Session.getEffectiveUser().getEmail();
-  const desbloqueadaPara = CacheService.getScriptCache().get(`HOJA_DESBLOQUEADA_${hoja.getSheetId()}`);
-  return desbloqueadaPara === currentUserEmail;
-}
 /**
  * Constante que define el nombre de la hoja de TRAMA.
  */
@@ -1071,7 +1041,7 @@ function _getInicioVigencia() {
 }
 
 /**
- * Verifica si la hoja TRAMA GRUPALES existe y, si no, la crea y configura.
+ * Verifica si la hoja TRAMA GRUPALES existe y, si no, la crea, formatea y protege.
  * @private
  */
 function _crearHojaTramaGrupales() {
@@ -1087,10 +1057,19 @@ function _crearHojaTramaGrupales() {
       'CORREO DE CONTACTO DE LA EMPRESA', 'PROGRAMA', 'INICIO/FIN VIGENCIA'
     ];
     
-    // El índice 0 asegura que se cree como la primera pestaña
     sheet = ss.insertSheet(sheetName, 0); 
-    sheet.appendRow(headers).setFrozenRows(1);
-    Logger.log(`Hoja '${sheetName}' creada y configurada.`);
+    sheet.appendRow(headers);
+    formatearEncabezados(sheet, headers.length);
+    
+    // Tarea 1: Asegurar que esta hoja también se proteja al crearse
+    try {
+      const proteccion = sheet.protect().setDescription('Protección del sistema ASISPLUS');
+      proteccion.removeEditors(proteccion.getEditors());
+      proteccion.addEditor(Session.getEffectiveUser());
+      Logger.log(`Hoja '${sheetName}' creada y protegida.`);
+    } catch (e) {
+      Logger.log(`No se pudo proteger automáticamente la hoja '${sheetName}'. Error: ${e.message}`);
+    }
   } else {
     Logger.log(`Hoja '${sheetName}' ya existe.`);
   }
