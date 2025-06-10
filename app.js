@@ -66,6 +66,9 @@ function configurarEntornoCompleto() {
     
     // 4. Configurar elementos de seguridad básicos
     configurarSeguridadBasica();
+
+    // 5. Crear la hoja de TRAMA GRUPALES (MODIFICACIÓN ACORDADA)
+    _crearHojaTramaGrupales();
     
     ui.alert(
       'Configuración Completada', 
