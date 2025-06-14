@@ -306,7 +306,12 @@ function procesarFormulario(formData) {
       guardarDatosDependientes(formData, idRegistro, numDependientes); 
       Logger.log('BACKEND: guardarDatosDependientes completado.');
     }
-    
+    // *** NUEVA LÍNEA AGREGADA: GENERAR REGISTRO EN TRAMA GRUPALES ***
+    Logger.log('BACKEND: Llamando a generarRegistroTrama...');
+    generarRegistroTrama(formData);
+    Logger.log('BACKEND: generarRegistroTrama completado.');
+
+
     Logger.log('BACKEND: Llamando a calcularMontoTotal...');
 // Dentro de tu función procesarFormulario(formData) en Código.gs
 
