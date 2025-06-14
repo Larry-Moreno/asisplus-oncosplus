@@ -1074,3 +1074,45 @@ function _crearHojaTramaGrupales() {
     Logger.log(`Hoja '${sheetName}' ya existe.`);
   }
 }
+
+function exportarTramaTitular() {
+  const ui = SpreadsheetApp.getUi();
+  
+  // Preguntar qué titular quiere exportar
+  const respuesta = ui.prompt(
+    'Exportar Titular',
+    'Ingresa el DNI del titular que quieres exportar:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (respuesta.getSelectedButton() !== ui.Button.OK) return;
+  
+  const dni = respuesta.getResponseText().trim();
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TRAMA GRUPALES');
+  const datos = hoja.getDataRange().getValues();
+  
+  // Buscar filas con ese DNI
+  const filasEncontradas = [];
+  for (let i = 1; i < datos.length; i++) { // i=1 para saltar encabezados
+    if (datos[i][3] === dni) { // Columna 4 es CERTFICADO
+      filasEncontradas.push(datos[i]);
+    }
+  }
+  
+  if (filasEncontradas.length === 0) {
+    ui.alert('No se encontraron registros para el DNI: ' + dni);
+    return;
+  }
+  
+  // Crear contenido del archivo TXT
+  let contenido = datos[0].join('\t') + '\n'; // Encabezados
+  filasEncontradas.forEach(fila => {
+    contenido += fila.join('\t') + '\n';
+  });
+  
+  // Crear archivo en Google Drive
+  const nombreArchivo = `TRAMA_${dni}_${new Date().getTime()}.txt`;
+  const archivo = DriveApp.createFile(nombreArchivo, contenido, MimeType.PLAIN_TEXT);
+  
+  ui.alert('Archivo creado: ' + archivo.getName() + '\nPuedes descargarlo desde Google Drive');
+}

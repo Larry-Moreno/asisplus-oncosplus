@@ -660,13 +660,45 @@ function guardarDatosTitular(formData) {
   // Calcular costos utilizando la función mejorada
   const tarifas = obtenerTarifasPorEdad(edad);
   
+  // CALCULAR FECHA DE INICIO DE VIGENCIA (1er día del mes siguiente)
+  const hoy = new Date();
+  let anio = hoy.getFullYear();
+  let mes = hoy.getMonth(); // 0 (Ene) a 11 (Dic)
+  
+  if (mes === 11) { // Si es Diciembre
+    mes = 0; // El mes será Enero
+    anio++; // del próximo año
+  } else {
+    mes++; // Simplemente el siguiente mes
+  }
+  const fechaInicioVigencia = new Date(anio, mes, 1); // Solo fecha, sin hora
+  
+  // CALCULAR TOTALES MENSUALES (Titular + Dependientes)
+  let totalMensualOncosalud = tarifas.oncosalud; // Titular
+  let totalMensualAsisplus = tarifas.asisplus; // Titular
+  
+  // Sumar dependientes si existen
+  const numDependientes = parseInt(formData.numeroDependientes || 0);
+  for (let i = 1; i <= numDependientes; i++) {
+    const fechaNacimientoDepStr = formData[`fechaNacimiento-${i}`];
+    if (fechaNacimientoDepStr) {
+      const fechaNacimientoDep = new Date(fechaNacimientoDepStr);
+      if (!isNaN(fechaNacimientoDep.getTime())) {
+        const edadDep = calcularEdad(fechaNacimientoDep);
+        const tarifasDep = obtenerTarifasPorEdad(edadDep);
+        totalMensualOncosalud += tarifasDep.oncosalud;
+        totalMensualAsisplus += tarifasDep.asisplus;
+      }
+    }
+  }
+  
   // Crear fila de datos según estructura EXACTA de TITULAR
   const fila = [
     new Date(),                     // REGISTRO (fecha/hora actual)
-    formData.paisNacimiento || "PER", // PAIS (usar país de nacimiento o PER por defecto)
+    formData.paisNacimiento,        // PAIS (usar país de nacimiento del formulario)
     "ALTA",                         // TIPO DE TRAMA (siempre ALTA para nuevos registros)
     "",                             // GF SAP (vacío)
-    "",                             // CERTFICADO (vacío)
+    "",                             // CERTFICADO (vacío según instrucción)
     formData.apellidoPaterno,       // APELLIDO PATERNO
     formData.apellidoMaterno,       // APELLIDO MATERNO
     formData.primerNombre,          // NOMBRE 1
@@ -676,10 +708,10 @@ function guardarDatosTitular(formData) {
     "TITULAR",                      // PARENTESCO (siempre TITULAR)
     formData.tipoDocumento,         // TIPO DE DOCUMENTO
     formData.numeroDocumento,       // NUMERO DE DOCUMENTO
-    "",                             // DIRECCION DE EMPRESA (vacío)
-    "",                             // CORREO DE CONTACTO DE LA EMPRESA (vacío)
-    "ONCOSALUD",                    // PROGRAMA (siempre ONCOSALUD)
-    new Date(),                     // INICIO/FIN VIGENCIA (fecha actual)
+    "CALLE ALFREDO SALAZAR 145 MIRAFLORES", // DIRECCION DE EMPRESA (valor fijo)
+    "GALVAREZ@ASEGUR.COM.PE",       // CORREO DE CONTACTO DE LA EMPRESA (valor fijo)
+    "PLUS",                         // PROGRAMA (valor fijo corregido)
+    fechaInicioVigencia,            // INICIO/FIN VIGENCIA (1er día mes siguiente, solo fecha)
     formData.paisNacimiento,        // PAIS DE NACIMIENTO
     formData.email,                 // EMAIL
     formData.telefono,              // TELEFONO
@@ -692,9 +724,11 @@ function guardarDatosTitular(formData) {
     formData.declaracionPrivacidad ? "SI" : "NO", // DECLARACIÓN DE PRIVACIDAD
     "NUEVO",                        // TIPO DE CLIENTE
     edad,                           // EDAD
-    tarifas.oncosalud,              // ONCOSALUD (tarifa específica)
-    tarifas.asisplus,               // ASISPLUS (tarifa específica)
-    idRegistro                      // ID_REGISTRO
+    tarifas.oncosalud,              // COSTO INDIVIDUAL ONCOSALUD
+    tarifas.asisplus,               // COSTO INDIVIDUAL ASISPLUS
+    totalMensualOncosalud,          // TOTAL MENSUAL ONCOSALUD (titular + dependientes)
+    totalMensualAsisplus,           // TOTAL MENSUAL ASISPLUS (A COBRAR) (titular + dependientes)
+    idRegistro                      // ID_REGISTRO (columna AI)
   ];
   
   // Agregar fila a la hoja
