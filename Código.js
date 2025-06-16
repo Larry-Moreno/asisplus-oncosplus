@@ -434,7 +434,7 @@ function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTota
     const payload = {
       reason: `Suscripción ASISPLUS ONCOPLUS - ${idRegistro}`,
       external_reference: idRegistro,
-      payer_email: "comprador_prueba@testuser.com", // Usuario específico - CORREO DEL COMPRADOR DE PRUEBA SANDBOX
+      payer_email: "test_user_574071750@testuser.com", // Usuario específico - CORREO DEL COMPRADOR DE PRUEBA SANDBOX - se revertió payer_email: "comprador_prueba@testuser.com"
       auto_recurring: {
         frequency: 1,
         frequency_type: "months",
@@ -443,7 +443,7 @@ function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTota
         start_date: startDateISO // Usar la variable calculada
       },
       back_url: backUrl, 
-      status: "authorized" // Para cobros automáticos
+      status: "pending" // Para cobros automáticos - En revisión inicial se revertió estos valores status: "authorized"
     };
     Logger.log(`BACKEND (${FUNCION_NOMBRE}): Payload para MP (/preapproval): ${JSON.stringify(payload)}`);
 
