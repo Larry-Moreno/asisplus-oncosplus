@@ -1104,20 +1104,29 @@ function exportarTramaTitular() {
   
   if (respuesta.getSelectedButton() !== ui.Button.OK) return;
   
-  const dni = respuesta.getResponseText().trim();
+  const dniIngresado = respuesta.getResponseText().trim();
   const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('TRAMA GRUPALES');
+  
+  if (!hoja) {
+    ui.alert('Error', 'No se encontró la hoja TRAMA GRUPALES', ui.ButtonSet.OK);
+    return;
+  }
+  
   const datos = hoja.getDataRange().getValues();
   
-  // Buscar filas con ese DNI
+  // Buscar filas con ese DNI (COMPARACIÓN MEJORADA)
   const filasEncontradas = [];
   for (let i = 1; i < datos.length; i++) { // i=1 para saltar encabezados
-    if (datos[i][3] === dni) { // Columna 4 es CERTFICADO
+    const certificadoEnHoja = String(datos[i][3]).trim(); // Columna D es índice 3, convertir a string
+    const dniComparar = String(dniIngresado).trim(); // Asegurar que ambos sean strings
+    
+    if (certificadoEnHoja === dniComparar) {
       filasEncontradas.push(datos[i]);
     }
   }
   
   if (filasEncontradas.length === 0) {
-    ui.alert('No se encontraron registros para el DNI: ' + dni);
+    ui.alert('No encontrado', `No se encontraron registros para el DNI: ${dniIngresado}`, ui.ButtonSet.OK);
     return;
   }
   
@@ -1128,8 +1137,12 @@ function exportarTramaTitular() {
   });
   
   // Crear archivo en Google Drive
-  const nombreArchivo = `TRAMA_${dni}_${new Date().getTime()}.txt`;
+  const nombreArchivo = `TRAMA_${dniIngresado}_${new Date().getTime()}.txt`;
   const archivo = DriveApp.createFile(nombreArchivo, contenido, MimeType.PLAIN_TEXT);
   
-  ui.alert('Archivo creado: ' + archivo.getName() + '\nPuedes descargarlo desde Google Drive');
+  ui.alert('Éxito', 
+    `Archivo creado exitosamente: ${archivo.getName()}\n\n` +
+    `Registros exportados: ${filasEncontradas.length} (Titular + ${filasEncontradas.length - 1} dependientes)\n\n` +
+    `Puedes descargarlo desde Google Drive.`, 
+    ui.ButtonSet.OK);
 }
