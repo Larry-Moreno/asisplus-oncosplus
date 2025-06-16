@@ -384,8 +384,8 @@ function insertarDatosIniciales(ss) {
     const filasFinal = hojaCostos.getLastRow();
     if (filasFinal > 1) {
       // Aplicar únicamente los formatos de moneda sin alterar el contenido
-      hojaCostos.getRange(2, 3, filasFinal - 1, 1).setNumberFormat("$#,##0.00");
-      hojaCostos.getRange(2, 4, filasFinal - 1, 1).setNumberFormat("$#,##0.00");
+      hojaCostos.getRange(2, 3, filasFinal - 1, 1).setNumberFormat("\"S/ \"#,##0.00");
+      hojaCostos.getRange(2, 4, filasFinal - 1, 1).setNumberFormat("\"S/ \"#,##0.00");
       Logger.log("Formatos de moneda aplicados a la hoja COSTOS (datos existentes conservados).");
     } else {
       Logger.log("La hoja COSTOS está vacía. No se aplicaron formatos.");
@@ -527,7 +527,7 @@ function configurarValidaciones() {
  */
 function aplicarFormatosAvanzados() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const formatoMonedaPeru = "S/ #,##0.00"; // Formato Soles
+  const formatoMonedaPeru = "\"S/ \"#,##0.00"; // Formato Soles
   try {
     const hojaTitular = ss.getSheetByName("TITULAR");
     if (hojaTitular) {
@@ -949,44 +949,46 @@ function generarRegistroTrama(datosFormulario) {
 
 /**
  * Función auxiliar privada para transformar el objeto de datos del formulario a un array de filas para la Trama.
- * @param {object} datosFormulario El objeto de la persona a procesar (puede ser titular o dependiente).
+ * VERSIÓN CORREGIDA - Compatible con estructura real del formData
+ * @param {object} datosFormulario El objeto de la persona a procesar (estructura plana del formCache)
  * @returns {Array<Array<any>>} Un array de arrays, donde cada array interno representa una fila.
  * @private
  */
 function _transformarDatosARows(datosFormulario) {
   const rows = [];
-  const titular = datosFormulario.titular;
-  const dependientes = datosFormulario.dependientes || [];
-
+  
   // Valores que son comunes a todas las filas de este registro.
-  const certificado = titular.numeroDocumento;
+  const certificado = datosFormulario.numeroDocumento || '';
   const inicioVigencia = _getInicioVigencia();
 
   // Mapeo de parentescos de texto a los códigos numéricos requeridos.
   const parentescoMap = {
     'TITULAR': '01',
-    'CONYUGE': '02',
-    'PADRE': '03', // Asumiendo 'PADRE' como texto de entrada
-    'MADRE': '03', // Asumiendo 'MADRE' como texto de entrada
+    'CONYUGE': '02', 
+    'CÓNYUGE': '02',
+    'PADRE': '03',
+    'MADRE': '03', 
     'HIJO': '04',
-    'HIJA': '04'
+    'HIJA': '04',
+    'HIJO/A': '04',
+    'OTRO': '05'
   };
 
-  // 1. Procesar la fila del Titular
+  // 1. Procesar la fila del Titular (estructura plana del formCache)
   const titularRow = [
     'PER', // PAIS (Fijo)
     'ALTA', // TIPO DE TRAMA (Fijo)
     '', // GF SAP (Vacío)
     certificado, // CERTFICADO (DNI del titular)
-    titular.apellidoPaterno, // APELLIDO PATERNO
-    titular.apellidoMaterno, // APELLIDO MATERNO
-    titular.nombre1, // NOMBRE 1 (Asume que el formulario envía nombre1 y nombre2)
-    titular.nombre2 || '', // NOMBRE 2 (Si no existe, se deja vacío)
-    titular.genero, // SEXO
-    titular.fechaNacimiento, // FECHA DE NACIMIENTO
+    datosFormulario.apellidoPaterno || '', // APELLIDO PATERNO
+    datosFormulario.apellidoMaterno || '', // APELLIDO MATERNO
+    datosFormulario.primerNombre || '', // NOMBRE 1
+    datosFormulario.segundoNombre || '', // NOMBRE 2
+    datosFormulario.sexo || '', // SEXO
+    datosFormulario.fechaNacimiento || '', // FECHA DE NACIMIENTO
     parentescoMap['TITULAR'], // PARENTESCO (Código Fijo para titular)
     '01', // TIPO DE DOCUMENTO (01: DNI, fijo por ahora)
-    titular.numeroDocumento, // NUMERO DE DOCUMENTO
+    datosFormulario.numeroDocumento || '', // NUMERO DE DOCUMENTO
     'CALLE ALFREDO SALAZAR 145 MIRAFLORES', // DIRECCION DE EMPRESA (Fijo)
     'GALVAREZ@ASEGUR.COM.PE', // CORREO DE CONTACTO DE LA EMPRESA (Fijo)
     'PLUS', // PROGRAMA (Fijo)
@@ -994,29 +996,44 @@ function _transformarDatosARows(datosFormulario) {
   ];
   rows.push(titularRow);
 
-  // 2. Procesar las filas de los Dependientes
-  dependientes.forEach(dependiente => {
-    const dependienteRow = [
-      'PER',
-      'ALTA',
-      '',
-      certificado, // CERTFICADO se replica del titular.
-      dependiente.apellidoPaterno,
-      dependiente.apellidoMaterno,
-      dependiente.nombre1,
-      dependiente.nombre2 || '',
-      dependiente.genero,
-      dependiente.fechaNacimiento,
-      parentescoMap[dependiente.parentesco.toUpperCase()] || '', // PARENTESCO (Código mapeado)
-      '01',
-      dependiente.numeroDocumento,
-      'CALLE ALFREDO SALAZAR 145 MIRAFLORES',
-      'GALVAREZ@ASEGUR.COM.PE',
-      'PLUS',
-      inicioVigencia // INICIO/FIN VIGENCIA se replica del titular.
-    ];
-    rows.push(dependienteRow);
-  });
+  // 2. Procesar las filas de los Dependientes (estructura con sufijos -1, -2, etc.)
+  const numDependientes = parseInt(datosFormulario.numeroDependientes || 0);
+  
+  for (let i = 1; i <= numDependientes; i++) {
+    // Construir las claves según el formato del formCache (primerNombre-1, apellidoPaterno-2, etc.)
+    const apellidoPaterno = datosFormulario[`apellidoPaterno-${i}`] || '';
+    const apellidoMaterno = datosFormulario[`apellidoMaterno-${i}`] || '';
+    const primerNombre = datosFormulario[`primerNombre-${i}`] || '';
+    const segundoNombre = datosFormulario[`segundoNombre-${i}`] || '';
+    const sexo = datosFormulario[`sexo-${i}`] || '';
+    const fechaNacimiento = datosFormulario[`fechaNacimiento-${i}`] || '';
+    const parentesco = datosFormulario[`parentesco-${i}`] || '';
+    const numeroDocumento = datosFormulario[`numeroDocumento-${i}`] || '';
+    
+    // Solo agregar fila si tiene datos mínimos (al menos primer nombre)
+    if (primerNombre.trim()) {
+      const dependienteRow = [
+        'PER',
+        'ALTA',
+        '',
+        certificado, // CERTFICADO se replica del titular.
+        apellidoPaterno,
+        apellidoMaterno,
+        primerNombre,
+        segundoNombre,
+        sexo,
+        fechaNacimiento,
+        parentescoMap[parentesco.toUpperCase()] || '05', // PARENTESCO (Código mapeado, default "OTRO")
+        '01',
+        numeroDocumento,
+        'CALLE ALFREDO SALAZAR 145 MIRAFLORES',
+        'GALVAREZ@ASEGUR.COM.PE',
+        'PLUS',
+        inicioVigencia // INICIO/FIN VIGENCIA se replica del titular.
+      ];
+      rows.push(dependienteRow);
+    }
+  }
 
   return rows;
 }
