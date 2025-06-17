@@ -388,147 +388,239 @@ function procesarFormulario(formData) {
 } // Fin de procesarFormulario
 
 //==================================================================
-//          SECCIÓN DE INTEGRACIÓN CON MERCADO PAGO
+//    INICIO SECCIÓN CONSOLIDADA DE INTEGRACIÓN CON MERCADO PAGO
 //==================================================================
 
+//=======================================================
+// PARTE 1: LÓGICA PARA CREAR LA SUSCRIPCIÓN
+//=======================================================
+
 /**
- * Crea una suscripción en Mercado Pago y registra la transacción inicial en la hoja.
- * @param {Object} formData - Datos completos del formulario (incluyendo formData.email).
- * @param {string} idRegistro - ID único del registro del titular en nuestro sistema.
+ * Crea una suscripción en Mercado Pago y registra la transacción.
+ * ARQUITECTURA FINAL: Funciona para TEST y PRODUCCIÓN.
+ * El comportamiento se controla desde la hoja "CONFIGURACION".
+ * @param {Object} formData - Datos completos del formulario.
+ * @param {string} idRegistro - ID único del registro del titular.
  * @param {number} montoTotal - Monto total a cobrar para la suscripción.
- * @return {Object} Objeto con el resultado: { success: boolean, init_point: string, subscription_id_mp: string, internal_transaction_id: string, error: string }
+ * @return {Object} Objeto con el resultado: { success: boolean, init_point: string, error: string }
  */
 function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTotal) {
   const FUNCION_NOMBRE = "crearSuscripcionEnMercadoPagoYRegistrar";
-  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Iniciando para idRegistro: ${idRegistro}, monto: ${montoTotal}, email: ${formData.email}`);
+  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Iniciando para idRegistro: ${idRegistro}`);
 
   try {
-    // 1. Recuperar Access Token de MP
-    const accessToken = recuperarCredencialSegura('Access Token');
+    // 1. LEER LA CONFIGURACIÓN DEL ENTORNO DESDE LA HOJA "CONFIGURACION"
+    const environment = obtenerValorConfig('MP_ENVIRONMENT');
+    if (environment !== 'TEST' && environment !== 'PRODUCTION') {
+      throw new Error("El entorno de MP ('MP_ENVIRONMENT') no está configurado. Debe ser 'TEST' o 'PRODUCTION' en la hoja 'CONFIGURACION'.");
+    }
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Modo de ejecución: ${environment}`);
+
+    let accessToken;
+    let payerEmail = null;
+
+    if (environment === 'TEST') {
+      accessToken = obtenerValorConfig('MP_TEST_ACCESS_TOKEN');
+      payerEmail = obtenerValorConfig('MP_TEST_PAYER_EMAIL'); // Solo para pruebas
+    } else { // PRODUCTION
+      accessToken = obtenerValorConfig('MP_PRODUCTION_ACCESS_TOKEN');
+    }
 
     if (!accessToken) {
-      Logger.log(`ERROR (${FUNCION_NOMBRE}): Access Token de Mercado Pago no configurado o no recuperable.`);
-      registrarLog("ERROR", "MERCADOPAGO_CREDS", "Access Token no disponible para crear suscripción.", {idRegistro: idRegistro}, FUNCION_NOMBRE);
-      return { success: false, error: "Error crítico: Credenciales de Mercado Pago no configuradas en el sistema." };
+      throw new Error(`El Access Token para el entorno '${environment}' no está configurado en la hoja 'CONFIGURACION'.`);
     }
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Access Token recuperado.`);
 
-    // 2. Definir back_url (STRING ÚNICO, no objeto)
+    // 2. CONSTRUIR EL PAYLOAD
+    const API_URL = 'https://api.mercadopago.com/preapproval';
     const webAppUrl = ScriptApp.getService().getUrl();
-    if (!webAppUrl) {
-        Logger.log(`ERROR (${FUNCION_NOMBRE}): No se pudo obtener la URL de la WebApp para la back_url.`);
-        registrarLog("ERROR", "MERCADOPAGO_CONFIG", "No se pudo obtener ScriptApp.getService().getUrl().", {idRegistro: idRegistro}, FUNCION_NOMBRE);
-        return { success: false, error: "Error de configuración interna del servidor (URL de WebApp no obtenida)." };
-    }
-    
     const backUrl = `${webAppUrl}?external_reference=${idRegistro}&source=mp_callback_preapproval_v1`;
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Back URL configurada: ${backUrl}`);
 
-    // 3. Calcular start_date para que sea unos minutos en el futuro
-    const ahora = new Date();
-    ahora.setMinutes(ahora.getMinutes() + 5); // Adelantar 5 minutos
-    const startDateISO = ahora.toISOString(); // Convertir a ISO 8601 UTC
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Start date calculado: ${startDateISO}`);
-
-    // 4. Construir el Payload para la API /preapproval de MP
     const payload = {
       reason: `Suscripción ASISPLUS ONCOPLUS - ${idRegistro}`,
       external_reference: idRegistro,
-      payer_email: "TESTUSER427554347@testuser.com", // Usuario específico - CORREO DEL COMPRADOR DE PRUEBA SANDBOX - se revertió payer_email: "comprador_prueba@testuser.com"
       auto_recurring: {
         frequency: 1,
         frequency_type: "months",
         transaction_amount: parseFloat(montoTotal.toFixed(2)),
         currency_id: "PEN",
-        start_date: startDateISO // Usar la variable calculada
+        start_date: new Date().toISOString()
       },
-      back_url: backUrl, 
-      status: "pending" // Para cobros automáticos - En revisión inicial se revertió estos valores status: "authorized"
+      back_url: backUrl,
+      status: "pending"
     };
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Payload para MP (/preapproval): ${JSON.stringify(payload)}`);
 
-    // 5. Realizar la Llamada a la API de MP
+    if (payerEmail) {
+      payload.payer_email = payerEmail;
+    }
+
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Payload final para MP: ${JSON.stringify(payload)}`);
+
+    // 3. REALIZAR LA LLAMADA A LA API
     const options = {
       method: "POST",
       headers: {
         "Authorization": "Bearer " + accessToken,
         "Content-Type": "application/json",
-        "X-Idempotency-Key": Utilities.getUuid() // Previene la creación de suscripciones duplicadas por reintentos de red
+        "X-Idempotency-Key": Utilities.getUuid()
       },
       payload: JSON.stringify(payload),
-      muteHttpExceptions: true // Para manejar errores de API manualmente
+      muteHttpExceptions: true
     };
 
-    const response = UrlFetchApp.fetch("https://api.mercadopago.com/preapproval", options);
+    const response = UrlFetchApp.fetch(API_URL, options);
     const responseCode = response.getResponseCode();
     const responseBody = response.getContentText();
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Respuesta de MP API. Código: ${responseCode}. Cuerpo: ${responseBody}`);
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Respuesta de MP API. Código: ${responseCode}.`);
 
-    // 6. Manejar la Respuesta de MP
     if (responseCode === 200 || responseCode === 201) {
       const subscriptionData = JSON.parse(responseBody);
-      const initPoint = subscriptionData.init_point;
-      const subscriptionIdMP = subscriptionData.id;
-
-      if (!initPoint || !subscriptionIdMP) {
-        Logger.log(`ERROR (${FUNCION_NOMBRE}): Respuesta de MP exitosa pero faltan init_point o ID de suscripción. Respuesta: ${responseBody}`);
-        registrarLog("ERROR", "MERCADOPAGO_RESPUESTA", "Respuesta exitosa de MP pero faltan datos clave (init_point/id).", {idRegistro: idRegistro, responseBody: responseBody}, FUNCION_NOMBRE);
-        return { success: false, error: "Respuesta inesperada de Mercado Pago tras crear suscripción." };
+      if (!subscriptionData.init_point) {
+         throw new Error("Respuesta de MP exitosa pero falta la URL 'init_point'.");
       }
-
-      // 7. Registrar en la hoja MERCADO_PAGO_TRANSACCIONES
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
-      const sheetTransacciones = ss.getSheetByName("MERCADO_PAGO_TRANSACCIONES");
-      const idTransaccionInterna = `TRANS-${new Date().getTime().toString(36)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
-      const fechaProximoCobroMP = subscriptionData.next_charge_date ? new Date(subscriptionData.next_charge_date) : calcularFechaProximoCobro(formData.periodicidadPago);
-
-      const filaTransaccion = [
-        idTransaccionInterna,
-        idRegistro,
-        subscriptionIdMP,
-        null, // ID_PAGO_MP (se obtendrá del webhook del primer pago exitoso)
-        parseFloat(montoTotal.toFixed(2)),
-        "PEN",
-        subscriptionData.status || "pending", // Estado inicial de la suscripción en MP
-        new Date(), // Fecha de esta operación de creación
-        fechaProximoCobroMP
-      ];
-      sheetTransacciones.appendRow(filaTransaccion);
-      Logger.log(`BACKEND (${FUNCION_NOMBRE}): Transacción interna ${idTransaccionInterna} registrada para suscripción MP ${subscriptionIdMP}.`);
-      registrarLog("INFO", "MERCADOPAGO_SUB_OK", `Suscripción creada en MP y registrada localmente (estado MP: ${subscriptionData.status}).`,
-                   {idRegistro: idRegistro, subscriptionIdMP: subscriptionIdMP, internalTxId: idTransaccionInterna, monto: montoTotal}, FUNCION_NOMBRE);
-
-      return {
-        success: true,
-        init_point: initPoint,
-        subscription_id_mp: subscriptionIdMP,
-        internal_transaction_id: idTransaccionInterna
-      };
-
-    } else { // Error de la API de Mercado Pago
+      return { success: true, init_point: subscriptionData.init_point };
+    } else {
       let errorDetail = `Error ${responseCode}`;
       try {
-        const errorJson = JSON.parse(responseBody);
-        errorDetail = errorJson.message || JSON.stringify(errorJson.cause) || responseBody;
+        errorDetail = JSON.parse(responseBody).message || responseBody;
       } catch (e) {
         errorDetail += ` - ${responseBody}`;
       }
-      Logger.log(`ERROR (${FUNCION_NOMBRE}): Fallo al crear suscripción en MP. Detalle: ${errorDetail}`);
-      registrarLog("ERROR", "MERCADOPAGO_SUB_FAIL", `Fallo al crear suscripción en MP: ${errorDetail}`,
-                   {idRegistro: idRegistro, responseCode: responseCode, responseBody: responseBody}, FUNCION_NOMBRE);
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): Fallo al crear suscripción. Detalle: ${errorDetail}`);
       return { success: false, error: `Error al procesar con Mercado Pago: ${errorDetail}` };
     }
+  } catch (error) {
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}.`);
+    return { success: false, error: `Error interno del servidor: ${error.message}` };
+  }
+}
 
-  } catch (error) { // Error general en la función
-    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
-    registrarLog("ERROR", "BACKEND_PAGO_EXCEPTION", `Excepción en ${FUNCION_NOMBRE}: ${error.message}`,
-                 {idRegistro: idRegistro, stack: error.stack}, FUNCION_NOMBRE);
-    return { success: false, error: `Error interno del servidor al iniciar el pago: ${error.message}` };
+//=======================================================
+// PARTE 2: LÓGICA PARA RECIBIR NOTIFICACIONES (WEBHOOKS)
+//=======================================================
+
+/**
+ * Función principal que se activa cuando Mercado Pago envía una notificación (Webhook).
+ * @param {object} e El objeto del evento que contiene los datos del POST.
+ */
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      Logger.log('Webhook recibido sin datos válidos.');
+      return ContentService.createTextOutput(JSON.stringify({ "status": "no data" })).setMimeType(ContentService.MimeType.JSON);
+    }
+    const notificacion = JSON.parse(e.postData.contents);
+    Logger.log(`Webhook recibido: ${JSON.stringify(notificacion)}`);
+
+    if (notificacion && notificacion.type === 'payment') {
+      const paymentId = notificacion.data.id;
+      if (paymentId) {
+        procesarNotificacionDePago(paymentId);
+      }
+    }
+    return ContentService.createTextOutput(JSON.stringify({ "status": "ok" })).setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    Logger.log(`ERROR CRÍTICO en la función doPost (Webhook): ${error.toString()}`);
+    registrarLog('ERROR', 'WEBHOOK_GENERAL', `Fallo en la función doPost: ${error.message}`, {postData: e ? e.postData.contents : 'N/A'});
+  }
+}
+
+/**
+ * Procesa la notificación de un pago específico, consultando la API de MP y actualizando la hoja.
+ * @param {string} paymentId El ID del pago notificado por Mercado Pago.
+ */
+function procesarNotificacionDePago(paymentId) {
+  try {
+    const detallesPago = consultarDetallesDePago(paymentId);
+    if (!detallesPago) return;
+
+    const idRegistro = detallesPago.external_reference;
+    if (!idRegistro) return;
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const hojaTransacciones = ss.getSheetByName('MERCADO_PAGO_TRANSACCIONES');
+    if (!hojaTransacciones) return;
+
+    const datos = hojaTransacciones.getDataRange().getValues();
+    for (let i = 1; i < datos.length; i++) {
+      if (datos[i][1] === idRegistro) { // Columna B: ID_REGISTRO
+        const estadoActual = detallesPago.status;
+        hojaTransacciones.getRange(i + 1, 4).setValue(paymentId); // Columna D: ID_PAGO_MP
+        hojaTransacciones.getRange(i + 1, 7).setValue(estadoActual); // Columna G: ESTADO
+
+        Logger.log(`Transacción para idRegistro ${idRegistro} actualizada. Nuevo estado: ${estadoActual}.`);
+        registrarLog('INFO', 'WEBHOOK_PROCESO', `Estado de pago actualizado a '${estadoActual}'`, { idRegistro, paymentId });
+
+        if (estadoActual === 'approved') {
+          Logger.log(`ACCIÓN GATILLADA: Enviar correo de bienvenida para ${idRegistro}.`);
+          // Aquí llamarías a tu función para enviar el correo de bienvenida.
+          // ejemplo: enviarCorreoBienvenida(idRegistro);
+        }
+        return;
+      }
+    }
+  } catch (error) {
+    Logger.log(`ERROR al procesar la notificación del pago ${paymentId}: ${error.toString()}`);
+    registrarLog('ERROR', 'WEBHOOK_PROCESO', `Fallo al procesar pago: ${error.message}`, { paymentId });
+  }
+}
+
+/**
+ * Consulta a la API de Mercado Pago para obtener los detalles de un pago.
+ * @param {string} paymentId El ID del pago.
+ * @returns {object|null} El objeto JSON con los detalles del pago, o null si hay un error.
+ */
+function consultarDetallesDePago(paymentId) {
+  try {
+    const accessToken = obtenerValorConfig('MP_PRODUCTION_ACCESS_TOKEN') || obtenerValorConfig('MP_TEST_ACCESS_TOKEN');
+    if (!accessToken) throw new Error("No se pudo obtener un Access Token para consultar el pago.");
+    
+    const API_URL = `https://api.mercadopago.com/v1/payments/${paymentId}`;
+    const options = {
+      method: "GET",
+      headers: { "Authorization": "Bearer " + accessToken },
+      muteHttpExceptions: true
+    };
+    const response = UrlFetchApp.fetch(API_URL, options);
+    if (response.getResponseCode() === 200) {
+      return JSON.parse(response.getContentText());
+    } else {
+      Logger.log(`Error al consultar pago ${paymentId}. Código: ${response.getResponseCode()}.`);
+      return null;
+    }
+  } catch (error) {
+    Logger.log(`Excepción al consultar detalles del pago ${paymentId}: ${error.toString()}`);
+    return null;
+  }
+}
+
+//=======================================================
+// PARTE 3: FUNCIÓN AUXILIAR PARA LEER LA CONFIGURACIÓN
+//=======================================================
+
+/**
+ * Obtiene un valor de configuración desde la hoja "CONFIGURACION".
+ * @param {string} clave El nombre de la clave a buscar en la Columna A.
+ * @returns {string|null} El valor correspondiente de la Columna B, o null si no se encuentra.
+ */
+function obtenerValorConfig(clave) {
+  try {
+    const hojaConfig = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CONFIGURACION');
+    if (!hojaConfig) return null;
+    const datos = hojaConfig.getDataRange().getValues();
+    for (let i = 0; i < datos.length; i++) {
+      if (datos[i][0] === clave) {
+        return datos[i][1];
+      }
+    }
+    return null;
+  } catch (e) {
+    Logger.log(`Error crítico al leer la configuración: ${e.toString()}`);
+    return null;
   }
 }
 
 //==================================================================
-//          FIN SECCIÓN DE INTEGRACIÓN CON MERCADO PAGO
+//     FIN SECCIÓN CONSOLIDADA DE INTEGRACIÓN CON MERCADO PAGO
 //==================================================================
 
 /**
