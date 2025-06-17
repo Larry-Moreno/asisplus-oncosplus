@@ -434,7 +434,7 @@ function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTota
     const payload = {
       reason: `Suscripción ASISPLUS ONCOPLUS - ${idRegistro}`,
       external_reference: idRegistro,
-      payer_email: "test_user_574071750@testuser.com", // Usuario específico - CORREO DEL COMPRADOR DE PRUEBA SANDBOX - se revertió payer_email: "comprador_prueba@testuser.com"
+      payer_email: "TESTUSER427554347@testuser.com", // Usuario específico - CORREO DEL COMPRADOR DE PRUEBA SANDBOX - se revertió payer_email: "comprador_prueba@testuser.com"
       auto_recurring: {
         frequency: 1,
         frequency_type: "months",
