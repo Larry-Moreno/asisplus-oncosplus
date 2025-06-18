@@ -1396,14 +1396,29 @@ function enviarCorreoBienvenidaPostPago(idRegistro) {
       return false;
     }
     
-    // 2. Extraer email del titular
+    // 2. Extraer datos del titular
     const email = datosTitular[19]; // Columna T (EMAIL)
     const nombreCompleto = `${datosTitular[7]} ${datosTitular[5]}`; // NOMBRE + APELLIDO
     
-    // 3. Cargar plantilla HTML del cliente
-    const plantillaHTML = HtmlService.createTemplateFromFile('PlantillaOncoplus').evaluate().getContent();
+    // 3. NUEVAS LÍNEAS: Obtener y calcular fechas dinámicas
+    const fechaVigencia = datosTitular[17]; // Columna R: INICIO/FIN VIGENCIA
+    const fechaCarencia = new Date(fechaVigencia);
+    fechaCarencia.setDate(fechaCarencia.getDate() + 90); // +90 días para carencia
     
-    // 4. Enviar correo usando la plantilla exacta del cliente
+    // Formatear fechas para mostrar (dd/mm/yyyy)
+    const fechaVigenciaStr = fechaVigencia.toLocaleDateString('es-PE');
+    const fechaCarenciaStr = fechaCarencia.toLocaleDateString('es-PE');
+    
+    Logger.log(`${FUNCION_NOMBRE}: Fechas calculadas - Vigencia: ${fechaVigenciaStr}, Carencia: ${fechaCarenciaStr}`);
+    
+    // 4. Cargar plantilla HTML del cliente y personalizar
+    let plantillaHTML = HtmlService.createTemplateFromFile('PlantillaOncoplus').evaluate().getContent();
+    
+    // Reemplazar fechas hardcodeadas por fechas reales
+    plantillaHTML = plantillaHTML.replace('01/04/2025', fechaVigenciaStr);
+    plantillaHTML = plantillaHTML.replace('01/07/2025', fechaCarenciaStr);
+    
+    // 5. Enviar correo usando la plantilla personalizada
     const asunto = "¡Bienvenido/a al Programa ONCOPLUS! - Tu cobertura está activada";
     
     MailApp.sendEmail({
@@ -1412,12 +1427,14 @@ function enviarCorreoBienvenidaPostPago(idRegistro) {
       htmlBody: plantillaHTML
     });
     
-    // 5. Registrar envío exitoso
+    // 6. Registrar envío exitoso
     Logger.log(`${FUNCION_NOMBRE}: Correo enviado exitosamente a: ${email}`);
     registrarLog("INFO", "CORREO_BIENVENIDA", `Correo de bienvenida enviado post-pago`, {
       idRegistro: idRegistro,
       email: email,
-      nombreCompleto: nombreCompleto
+      nombreCompleto: nombreCompleto,
+      fechaVigencia: fechaVigenciaStr,
+      fechaCarencia: fechaCarenciaStr
     }, FUNCION_NOMBRE);
     
     return true;

@@ -568,7 +568,8 @@
                         
                         <td valign="top" class="mcnTextContent" style="padding-top:0; padding-right:18px; padding-bottom:9px; padding-left:18px;">
                         
-                            <strong>Estimad@ cliente</strong>
+                            <!-- Saludo personalizado -->
+                            <strong>Estimado ${primerNombre} ${apellidoPaterno}</strong>
                         </td>
                     </tr>
                 </tbody></table>
@@ -763,12 +764,12 @@ Nos complace acompañarte en este importante paso para cuidar de ti y de los que
 				<tbody>
 					<tr>
 						<td style="text-align: justify;" valign="top">
-						<table align="left" border="0" cellpadding="0" cellspacing="0" width="100%">
+                        <table align="left" border="0" cellpadding="0" cellspacing="0" width="100%">
 							<tbody>
 								<tr>
-									<td style="text-align: justify;" valign="top"><strong>🔓&nbsp; Inicio de vigencia</strong>: 01/04/2025<br>
+									<td style="text-align: justify;" valign="top"><strong>🔓&nbsp; Inicio de vigencia</strong>: ${fechaVigenciaStr}<br>
 									<br>
-									📌&nbsp;<strong>Importante:</strong>&nbsp;Recuerda que el programa tiene un&nbsp;<strong>periodo de carencia de 90 días </strong>por lo que<strong>&nbsp;</strong>tu cobertura completa estará activa a partir del&nbsp;<strong>01/07/2025.</strong><br>
+									📌&nbsp;<strong>Importante:</strong>&nbsp;Recuerda que el programa tiene un&nbsp;<strong>periodo de carencia de 90 días </strong>por lo que<strong>&nbsp;</strong>tu cobertura completa estará activa a partir del&nbsp;<strong>${fechaCarenciaStr}.</strong><br>
 									&nbsp;</td>
 								</tr>
 							</tbody>
