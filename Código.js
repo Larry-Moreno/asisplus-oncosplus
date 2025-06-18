@@ -434,6 +434,7 @@ function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTota
     const payload = {
       reason: `Suscripción ASISPLUS ONCOPLUS - ${idRegistro}`,
       external_reference: idRegistro,
+      payer_email: formData.email,  // ← ESTA LÍNEA ES LA NUEVA
       auto_recurring: {
         frequency: 1,
         frequency_type: "months",
