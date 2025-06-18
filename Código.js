@@ -388,53 +388,49 @@ function procesarFormulario(formData) {
 } // Fin de procesarFormulario
 
 //==================================================================
-//    INICIO SECCIÓN CONSOLIDADA DE INTEGRACIÓN CON MERCADO PAGO
+//          SECCIÓN COMPLETA DE INTEGRACIÓN CON MERCADO PAGO
 //==================================================================
 
-//=======================================================
-// PARTE 1: LÓGICA PARA CREAR LA SUSCRIPCIÓN
-//=======================================================
-
 /**
- * Crea una suscripción en Mercado Pago y registra la transacción.
- * ARQUITECTURA FINAL: Funciona para TEST y PRODUCCIÓN.
- * El comportamiento se controla desde la hoja "CONFIGURACION".
- * @param {Object} formData - Datos completos del formulario.
- * @param {string} idRegistro - ID único del registro del titular.
+ * Crea una suscripción en Mercado Pago y registra la transacción inicial en la hoja.
+ * @param {Object} formData - Datos completos del formulario (incluyendo formData.email).
+ * @param {string} idRegistro - ID único del registro del titular en nuestro sistema.
  * @param {number} montoTotal - Monto total a cobrar para la suscripción.
- * @return {Object} Objeto con el resultado: { success: boolean, init_point: string, error: string }
+ * @return {Object} Objeto con el resultado: { success: boolean, init_point: string, subscription_id_mp: string, internal_transaction_id: string, error: string }
  */
 function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTotal) {
   const FUNCION_NOMBRE = "crearSuscripcionEnMercadoPagoYRegistrar";
-  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Iniciando para idRegistro: ${idRegistro}`);
+  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Iniciando para idRegistro: ${idRegistro}, monto: ${montoTotal}, email: ${formData.email}`);
 
   try {
-    // 1. LEER LA CONFIGURACIÓN DEL ENTORNO DESDE LA HOJA "CONFIGURACION"
-    const environment = obtenerValorConfig('MP_ENVIRONMENT');
-    if (environment !== 'TEST' && environment !== 'PRODUCTION') {
-      throw new Error("El entorno de MP ('MP_ENVIRONMENT') no está configurado. Debe ser 'TEST' o 'PRODUCTION' en la hoja 'CONFIGURACION'.");
-    }
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Modo de ejecución: ${environment}`);
-
-    let accessToken;
-    let payerEmail = null;
-
-    if (environment === 'TEST') {
-      accessToken = obtenerValorConfig('MP_TEST_ACCESS_TOKEN');
-      payerEmail = obtenerValorConfig('MP_TEST_PAYER_EMAIL'); // Solo para pruebas
-    } else { // PRODUCTION
-      accessToken = obtenerValorConfig('MP_PRODUCTION_ACCESS_TOKEN');
-    }
+    // 1. Recuperar Access Token de MP
+    const accessToken = recuperarCredencialSegura('Access Token');
 
     if (!accessToken) {
-      throw new Error(`El Access Token para el entorno '${environment}' no está configurado en la hoja 'CONFIGURACION'.`);
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): Access Token de Mercado Pago no configurado o no recuperable.`);
+      registrarLog("ERROR", "MERCADOPAGO_CREDS", "Access Token no disponible para crear suscripción.", {idRegistro: idRegistro}, FUNCION_NOMBRE);
+      return { success: false, error: "Error crítico: Credenciales de Mercado Pago no configuradas en el sistema." };
     }
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Access Token recuperado.`);
 
-    // 2. CONSTRUIR EL PAYLOAD
-    const API_URL = 'https://api.mercadopago.com/preapproval';
+    // 2. Definir back_url (STRING ÚNICO, no objeto)
     const webAppUrl = ScriptApp.getService().getUrl();
+    if (!webAppUrl) {
+        Logger.log(`ERROR (${FUNCION_NOMBRE}): No se pudo obtener la URL de la WebApp para la back_url.`);
+        registrarLog("ERROR", "MERCADOPAGO_CONFIG", "No se pudo obtener ScriptApp.getService().getUrl().", {idRegistro: idRegistro}, FUNCION_NOMBRE);
+        return { success: false, error: "Error de configuración interna del servidor (URL de WebApp no obtenida)." };
+    }
+    
     const backUrl = `${webAppUrl}?external_reference=${idRegistro}&source=mp_callback_preapproval_v1`;
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Back URL configurada: ${backUrl}`);
 
+    // 3. Calcular start_date para que sea unos minutos en el futuro
+    const ahora = new Date();
+    ahora.setMinutes(ahora.getMinutes() + 5); // Adelantar 5 minutos
+    const startDateISO = ahora.toISOString(); // Convertir a ISO 8601 UTC
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Start date calculado: ${startDateISO}`);
+
+    // 4. Construir el Payload para la API /preapproval de MP
     const payload = {
       reason: `Suscripción ASISPLUS ONCOPLUS - ${idRegistro}`,
       external_reference: idRegistro,
@@ -443,84 +439,138 @@ function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTota
         frequency_type: "months",
         transaction_amount: parseFloat(montoTotal.toFixed(2)),
         currency_id: "PEN",
-        start_date: new Date().toISOString()
+        start_date: startDateISO // Usar la variable calculada
       },
-      back_url: backUrl,
-      status: "pending"
+      back_url: backUrl, 
+      status: "pending" // Para cobros automáticos
     };
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Payload para MP (/preapproval): ${JSON.stringify(payload)}`);
 
-    if (payerEmail) {
-      payload.payer_email = payerEmail;
-    }
-
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Payload final para MP: ${JSON.stringify(payload)}`);
-
-    // 3. REALIZAR LA LLAMADA A LA API
+    // 5. Realizar la Llamada a la API de MP
     const options = {
       method: "POST",
       headers: {
         "Authorization": "Bearer " + accessToken,
         "Content-Type": "application/json",
-        "X-Idempotency-Key": Utilities.getUuid()
+        "X-Idempotency-Key": Utilities.getUuid() // Previene la creación de suscripciones duplicadas por reintentos de red
       },
       payload: JSON.stringify(payload),
-      muteHttpExceptions: true
+      muteHttpExceptions: true // Para manejar errores de API manualmente
     };
 
-    const response = UrlFetchApp.fetch(API_URL, options);
+    const response = UrlFetchApp.fetch("https://api.mercadopago.com/preapproval", options);
     const responseCode = response.getResponseCode();
     const responseBody = response.getContentText();
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Respuesta de MP API. Código: ${responseCode}.`);
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Respuesta de MP API. Código: ${responseCode}. Cuerpo: ${responseBody}`);
 
+    // 6. Manejar la Respuesta de MP
     if (responseCode === 200 || responseCode === 201) {
       const subscriptionData = JSON.parse(responseBody);
-      if (!subscriptionData.init_point) {
-         throw new Error("Respuesta de MP exitosa pero falta la URL 'init_point'.");
+      const initPoint = subscriptionData.init_point;
+      const subscriptionIdMP = subscriptionData.id;
+
+      if (!initPoint || !subscriptionIdMP) {
+        Logger.log(`ERROR (${FUNCION_NOMBRE}): Respuesta de MP exitosa pero faltan init_point o ID de suscripción. Respuesta: ${responseBody}`);
+        registrarLog("ERROR", "MERCADOPAGO_RESPUESTA", "Respuesta exitosa de MP pero faltan datos clave (init_point/id).", {idRegistro: idRegistro, responseBody: responseBody}, FUNCION_NOMBRE);
+        return { success: false, error: "Respuesta inesperada de Mercado Pago tras crear suscripción." };
       }
-      return { success: true, init_point: subscriptionData.init_point };
-    } else {
+
+      // 7. Registrar en la hoja MERCADO_PAGO_TRANSACCIONES
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sheetTransacciones = ss.getSheetByName("MERCADO_PAGO_TRANSACCIONES");
+      const idTransaccionInterna = `TRANS-${new Date().getTime().toString(36)}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
+      const fechaProximoCobroMP = subscriptionData.next_charge_date ? new Date(subscriptionData.next_charge_date) : calcularFechaProximoCobro(formData.periodicidadPago);
+
+      const filaTransaccion = [
+        idTransaccionInterna,
+        idRegistro,
+        subscriptionIdMP,
+        null, // ID_PAGO_MP (se obtendrá del webhook del primer pago exitoso)
+        parseFloat(montoTotal.toFixed(2)),
+        "PEN",
+        subscriptionData.status || "pending", // Estado inicial de la suscripción en MP
+        new Date(), // Fecha de esta operación de creación
+        fechaProximoCobroMP
+      ];
+      sheetTransacciones.appendRow(filaTransaccion);
+      Logger.log(`BACKEND (${FUNCION_NOMBRE}): Transacción interna ${idTransaccionInterna} registrada para suscripción MP ${subscriptionIdMP}.`);
+      registrarLog("INFO", "MERCADOPAGO_SUB_OK", `Suscripción creada en MP y registrada localmente (estado MP: ${subscriptionData.status}).`,
+                   {idRegistro: idRegistro, subscriptionIdMP: subscriptionIdMP, internalTxId: idTransaccionInterna, monto: montoTotal}, FUNCION_NOMBRE);
+
+      return {
+        success: true,
+        init_point: initPoint,
+        subscription_id_mp: subscriptionIdMP,
+        internal_transaction_id: idTransaccionInterna
+      };
+
+    } else { // Error de la API de Mercado Pago
       let errorDetail = `Error ${responseCode}`;
       try {
-        errorDetail = JSON.parse(responseBody).message || responseBody;
+        const errorJson = JSON.parse(responseBody);
+        errorDetail = errorJson.message || JSON.stringify(errorJson.cause) || responseBody;
       } catch (e) {
         errorDetail += ` - ${responseBody}`;
       }
-      Logger.log(`ERROR (${FUNCION_NOMBRE}): Fallo al crear suscripción. Detalle: ${errorDetail}`);
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): Fallo al crear suscripción en MP. Detalle: ${errorDetail}`);
+      registrarLog("ERROR", "MERCADOPAGO_SUB_FAIL", `Fallo al crear suscripción en MP: ${errorDetail}`,
+                   {idRegistro: idRegistro, responseCode: responseCode, responseBody: responseBody}, FUNCION_NOMBRE);
       return { success: false, error: `Error al procesar con Mercado Pago: ${errorDetail}` };
     }
-  } catch (error) {
-    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}.`);
-    return { success: false, error: `Error interno del servidor: ${error.message}` };
+
+  } catch (error) { // Error general en la función
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+    registrarLog("ERROR", "BACKEND_PAGO_EXCEPTION", `Excepción en ${FUNCION_NOMBRE}: ${error.message}`,
+                 {idRegistro: idRegistro, stack: error.stack}, FUNCION_NOMBRE);
+    return { success: false, error: `Error interno del servidor al iniciar el pago: ${error.message}` };
   }
 }
-
-//=======================================================
-// PARTE 2: LÓGICA PARA RECIBIR NOTIFICACIONES (WEBHOOKS)
-//=======================================================
 
 /**
  * Función principal que se activa cuando Mercado Pago envía una notificación (Webhook).
  * @param {object} e El objeto del evento que contiene los datos del POST.
  */
 function doPost(e) {
+  const FUNCION_NOMBRE = "doPost";
+  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Webhook recibido de Mercado Pago.`);
+  
   try {
     if (!e || !e.postData || !e.postData.contents) {
-      Logger.log('Webhook recibido sin datos válidos.');
+      Logger.log(`WARNING (${FUNCION_NOMBRE}): Webhook recibido sin datos válidos.`);
+      registrarLog("WARNING", "WEBHOOK_MP", "Webhook recibido sin datos válidos.", {postData: "null"}, FUNCION_NOMBRE);
       return ContentService.createTextOutput(JSON.stringify({ "status": "no data" })).setMimeType(ContentService.MimeType.JSON);
     }
-    const notificacion = JSON.parse(e.postData.contents);
-    Logger.log(`Webhook recibido: ${JSON.stringify(notificacion)}`);
 
-    if (notificacion && notificacion.type === 'payment') {
+    const notificacion = JSON.parse(e.postData.contents);
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Notificación parseada: ${JSON.stringify(notificacion)}`);
+    registrarLog("INFO", "WEBHOOK_MP", "Notificación de Mercado Pago recibida.", {notificacion: notificacion}, FUNCION_NOMBRE);
+
+    // Procesar según el tipo de notificación
+    if (notificacion.type === 'payment') {
+      // Notificación de pago individual
       const paymentId = notificacion.data.id;
       if (paymentId) {
+        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de pago ID: ${paymentId}`);
         procesarNotificacionDePago(paymentId);
       }
+    } else if (notificacion.type === 'subscription_preapproval') {
+      // Notificación de suscripción
+      const subscriptionId = notificacion.data.id;
+      if (subscriptionId) {
+        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de suscripción ID: ${subscriptionId}`);
+        procesarNotificacionDeSuscripcion(subscriptionId);
+      }
+    } else {
+      Logger.log(`INFO (${FUNCION_NOMBRE}): Tipo de notificación no procesado: ${notificacion.type}`);
+      registrarLog("INFO", "WEBHOOK_MP", `Tipo de notificación no procesado: ${notificacion.type}`, {notificacion: notificacion}, FUNCION_NOMBRE);
     }
+
     return ContentService.createTextOutput(JSON.stringify({ "status": "ok" })).setMimeType(ContentService.MimeType.JSON);
+    
   } catch (error) {
-    Logger.log(`ERROR CRÍTICO en la función doPost (Webhook): ${error.toString()}`);
-    registrarLog('ERROR', 'WEBHOOK_GENERAL', `Fallo en la función doPost: ${error.message}`, {postData: e ? e.postData.contents : 'N/A'});
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+    registrarLog("ERROR", "WEBHOOK_MP", `Error crítico en webhook: ${error.message}`, {postData: e ? e.postData.contents : 'N/A', stack: error.stack}, FUNCION_NOMBRE);
+    return ContentService.createTextOutput(JSON.stringify({ "status": "error", "message": error.message })).setMimeType(ContentService.MimeType.JSON);
   }
 }
 
@@ -529,38 +579,141 @@ function doPost(e) {
  * @param {string} paymentId El ID del pago notificado por Mercado Pago.
  */
 function procesarNotificacionDePago(paymentId) {
+  const FUNCION_NOMBRE = "procesarNotificacionDePago";
+  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Iniciando procesamiento para pago ID: ${paymentId}`);
+  
   try {
+    // 1. Consultar detalles del pago en MP
     const detallesPago = consultarDetallesDePago(paymentId);
-    if (!detallesPago) return;
+    if (!detallesPago) {
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): No se pudieron obtener detalles del pago ${paymentId}`);
+      return;
+    }
 
-    const idRegistro = detallesPago.external_reference;
-    if (!idRegistro) return;
+    const externalReference = detallesPago.external_reference;
+    const estadoPago = detallesPago.status;
+    const montoTotal = detallesPago.transaction_amount;
+    
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago ${paymentId} - Estado: ${estadoPago}, External Reference: ${externalReference}, Monto: ${montoTotal}`);
 
+    if (!externalReference) {
+      Logger.log(`WARNING (${FUNCION_NOMBRE}): Pago ${paymentId} no tiene external_reference asociado.`);
+      registrarLog("WARNING", "WEBHOOK_MP_PAGO", `Pago sin external_reference: ${paymentId}`, {paymentId: paymentId, detallesPago: detallesPago}, FUNCION_NOMBRE);
+      return;
+    }
+
+    // 2. Actualizar el registro en MERCADO_PAGO_TRANSACCIONES
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const hojaTransacciones = ss.getSheetByName('MERCADO_PAGO_TRANSACCIONES');
-    if (!hojaTransacciones) return;
+    if (!hojaTransacciones) {
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): Hoja MERCADO_PAGO_TRANSACCIONES no encontrada.`);
+      registrarLog("ERROR", "WEBHOOK_MP_PAGO", "Hoja MERCADO_PAGO_TRANSACCIONES no existe.", {paymentId: paymentId}, FUNCION_NOMBRE);
+      return;
+    }
 
     const datos = hojaTransacciones.getDataRange().getValues();
-    for (let i = 1; i < datos.length; i++) {
-      if (datos[i][1] === idRegistro) { // Columna B: ID_REGISTRO
-        const estadoActual = detallesPago.status;
+    let registroActualizado = false;
+
+    for (let i = 1; i < datos.length; i++) { // Empezar desde 1 para saltar encabezados
+      const idRegistroEnHoja = datos[i][1]; // Columna B: ID_REGISTRO
+      
+      if (idRegistroEnHoja === externalReference) {
+        // Actualizar la fila encontrada
         hojaTransacciones.getRange(i + 1, 4).setValue(paymentId); // Columna D: ID_PAGO_MP
-        hojaTransacciones.getRange(i + 1, 7).setValue(estadoActual); // Columna G: ESTADO
+        hojaTransacciones.getRange(i + 1, 7).setValue(estadoPago); // Columna G: ESTADO
+        hojaTransacciones.getRange(i + 1, 8).setValue(new Date()); // Columna H: FECHA_TRANSACCION (actualizar)
+        
+        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Registro actualizado para ${externalReference}. Nuevo estado: ${estadoPago}`);
+        registrarLog("INFO", "WEBHOOK_MP_PAGO", `Estado de pago actualizado a '${estadoPago}'`, {
+          idRegistro: externalReference, 
+          paymentId: paymentId, 
+          estadoAnterior: datos[i][6], 
+          estadoNuevo: estadoPago
+        }, FUNCION_NOMBRE);
+        
+        registroActualizado = true;
 
-        Logger.log(`Transacción para idRegistro ${idRegistro} actualizada. Nuevo estado: ${estadoActual}.`);
-        registrarLog('INFO', 'WEBHOOK_PROCESO', `Estado de pago actualizado a '${estadoActual}'`, { idRegistro, paymentId });
-
-        if (estadoActual === 'approved') {
-          Logger.log(`ACCIÓN GATILLADA: Enviar correo de bienvenida para ${idRegistro}.`);
-          // Aquí llamarías a tu función para enviar el correo de bienvenida.
-          // ejemplo: enviarCorreoBienvenida(idRegistro);
+        // 3. Disparar acciones según el estado del pago (COMENTADO TEMPORALMENTE)
+        if (estadoPago === 'approved') {
+          Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago aprobado. Disparando correo de bienvenida para ${externalReference}`);
+          // enviarCorreoBienvenida(externalReference); // COMENTADO TEMPORALMENTE - IMPLEMENTAR DESPUÉS
+        } else if (estadoPago === 'rejected') {
+          Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago rechazado. Disparando correo de problema para ${externalReference}`);
+          // enviarCorreoProblema(externalReference, 'Pago rechazado'); // COMENTADO TEMPORALMENTE - IMPLEMENTAR DESPUÉS
+        } else if (estadoPago === 'cancelled') {
+          Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago cancelado para ${externalReference}`);
+          registrarLog("INFO", "PAGO_CANCELADO", `Pago cancelado por el usuario`, {idRegistro: externalReference, paymentId: paymentId}, FUNCION_NOMBRE);
         }
-        return;
+        
+        break; // Salir del bucle una vez encontrado y actualizado
       }
     }
+
+    if (!registroActualizado) {
+      Logger.log(`WARNING (${FUNCION_NOMBRE}): No se encontró registro para external_reference: ${externalReference}`);
+      registrarLog("WARNING", "WEBHOOK_MP_PAGO", `No se encontró registro local para external_reference: ${externalReference}`, {
+        paymentId: paymentId, 
+        externalReference: externalReference
+      }, FUNCION_NOMBRE);
+    }
+
   } catch (error) {
-    Logger.log(`ERROR al procesar la notificación del pago ${paymentId}: ${error.toString()}`);
-    registrarLog('ERROR', 'WEBHOOK_PROCESO', `Fallo al procesar pago: ${error.message}`, { paymentId });
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+    registrarLog("ERROR", "WEBHOOK_MP_PAGO", `Error al procesar notificación de pago: ${error.message}`, {
+      paymentId: paymentId, 
+      stack: error.stack
+    }, FUNCION_NOMBRE);
+  }
+}
+
+/**
+ * Procesa la notificación de una suscripción específica.
+ * @param {string} subscriptionId El ID de la suscripción notificada por Mercado Pago.
+ */
+function procesarNotificacionDeSuscripcion(subscriptionId) {
+  const FUNCION_NOMBRE = "procesarNotificacionDeSuscripcion";
+  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Iniciando procesamiento para suscripción ID: ${subscriptionId}`);
+  
+  try {
+    // 1. Consultar detalles de la suscripción en MP
+    const detallesSuscripcion = consultarDetallesDeSuscripcion(subscriptionId);
+    if (!detallesSuscripcion) {
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): No se pudieron obtener detalles de la suscripción ${subscriptionId}`);
+      return;
+    }
+
+    const externalReference = detallesSuscripcion.external_reference;
+    const estadoSuscripcion = detallesSuscripcion.status;
+    
+    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Suscripción ${subscriptionId} - Estado: ${estadoSuscripcion}, External Reference: ${externalReference}`);
+
+    if (!externalReference) {
+      Logger.log(`WARNING (${FUNCION_NOMBRE}): Suscripción ${subscriptionId} no tiene external_reference asociado.`);
+      return;
+    }
+
+    // 2. Registrar el cambio de estado de suscripción
+    registrarLog("INFO", "WEBHOOK_MP_SUSCRIPCION", `Estado de suscripción actualizado a '${estadoSuscripcion}'`, {
+      idRegistro: externalReference, 
+      subscriptionId: subscriptionId, 
+      estadoSuscripcion: estadoSuscripcion
+    }, FUNCION_NOMBRE);
+
+    // 3. Acciones específicas según el estado de la suscripción (COMENTADO TEMPORALMENTE)
+    if (estadoSuscripcion === 'cancelled') {
+      Logger.log(`BACKEND (${FUNCION_NOMBRE}): Suscripción cancelada para ${externalReference}`);
+      // enviarCorreoProblema(externalReference, 'Suscripción cancelada'); // COMENTADO TEMPORALMENTE - IMPLEMENTAR DESPUÉS
+    } else if (estadoSuscripcion === 'paused') {
+      Logger.log(`BACKEND (${FUNCION_NOMBRE}): Suscripción pausada para ${externalReference}`);
+      registrarLog("INFO", "SUSCRIPCION_PAUSADA", `Suscripción pausada`, {idRegistro: externalReference, subscriptionId: subscriptionId}, FUNCION_NOMBRE);
+    }
+
+  } catch (error) {
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+    registrarLog("ERROR", "WEBHOOK_MP_SUSCRIPCION", `Error al procesar notificación de suscripción: ${error.message}`, {
+      subscriptionId: subscriptionId, 
+      stack: error.stack
+    }, FUNCION_NOMBRE);
   }
 }
 
@@ -570,57 +723,104 @@ function procesarNotificacionDePago(paymentId) {
  * @returns {object|null} El objeto JSON con los detalles del pago, o null si hay un error.
  */
 function consultarDetallesDePago(paymentId) {
+  const FUNCION_NOMBRE = "consultarDetallesDePago";
+  
   try {
-    const accessToken = obtenerValorConfig('MP_PRODUCTION_ACCESS_TOKEN') || obtenerValorConfig('MP_TEST_ACCESS_TOKEN');
-    if (!accessToken) throw new Error("No se pudo obtener un Access Token para consultar el pago.");
+    const accessToken = recuperarCredencialSegura('Access Token');
+    if (!accessToken) {
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): No se pudo obtener Access Token para consultar el pago ${paymentId}.`);
+      return null;
+    }
     
     const API_URL = `https://api.mercadopago.com/v1/payments/${paymentId}`;
     const options = {
       method: "GET",
-      headers: { "Authorization": "Bearer " + accessToken },
+      headers: { 
+        "Authorization": "Bearer " + accessToken,
+        "Content-Type": "application/json"
+      },
       muteHttpExceptions: true
     };
+    
     const response = UrlFetchApp.fetch(API_URL, options);
-    if (response.getResponseCode() === 200) {
-      return JSON.parse(response.getContentText());
+    const responseCode = response.getResponseCode();
+    const responseBody = response.getContentText();
+    
+    if (responseCode === 200) {
+      Logger.log(`BACKEND (${FUNCION_NOMBRE}): Detalles del pago ${paymentId} obtenidos exitosamente.`);
+      return JSON.parse(responseBody);
     } else {
-      Logger.log(`Error al consultar pago ${paymentId}. Código: ${response.getResponseCode()}.`);
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): Error al consultar pago ${paymentId}. Código: ${responseCode}. Respuesta: ${responseBody}`);
+      registrarLog("ERROR", "CONSULTA_MP_PAGO", `Error al consultar detalles del pago: HTTP ${responseCode}`, {
+        paymentId: paymentId, 
+        responseCode: responseCode, 
+        responseBody: responseBody
+      }, FUNCION_NOMBRE);
       return null;
     }
   } catch (error) {
-    Logger.log(`Excepción al consultar detalles del pago ${paymentId}: ${error.toString()}`);
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+    registrarLog("ERROR", "CONSULTA_MP_PAGO", `Excepción al consultar detalles del pago: ${error.message}`, {
+      paymentId: paymentId, 
+      stack: error.stack
+    }, FUNCION_NOMBRE);
     return null;
   }
 }
 
-//=======================================================
-// PARTE 3: FUNCIÓN AUXILIAR PARA LEER LA CONFIGURACIÓN
-//=======================================================
-
 /**
- * Obtiene un valor de configuración desde la hoja "CONFIGURACION".
- * @param {string} clave El nombre de la clave a buscar en la Columna A.
- * @returns {string|null} El valor correspondiente de la Columna B, o null si no se encuentra.
+ * Consulta a la API de Mercado Pago para obtener los detalles de una suscripción.
+ * @param {string} subscriptionId El ID de la suscripción.
+ * @returns {object|null} El objeto JSON con los detalles de la suscripción, o null si hay un error.
  */
-function obtenerValorConfig(clave) {
+function consultarDetallesDeSuscripcion(subscriptionId) {
+  const FUNCION_NOMBRE = "consultarDetallesDeSuscripcion";
+  
   try {
-    const hojaConfig = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CONFIGURACION');
-    if (!hojaConfig) return null;
-    const datos = hojaConfig.getDataRange().getValues();
-    for (let i = 0; i < datos.length; i++) {
-      if (datos[i][0] === clave) {
-        return datos[i][1];
-      }
+    const accessToken = recuperarCredencialSegura('Access Token');
+    if (!accessToken) {
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): No se pudo obtener Access Token para consultar la suscripción ${subscriptionId}.`);
+      return null;
     }
-    return null;
-  } catch (e) {
-    Logger.log(`Error crítico al leer la configuración: ${e.toString()}`);
+    
+    const API_URL = `https://api.mercadopago.com/preapproval/${subscriptionId}`;
+    const options = {
+      method: "GET",
+      headers: { 
+        "Authorization": "Bearer " + accessToken,
+        "Content-Type": "application/json"
+      },
+      muteHttpExceptions: true
+    };
+    
+    const response = UrlFetchApp.fetch(API_URL, options);
+    const responseCode = response.getResponseCode();
+    const responseBody = response.getContentText();
+    
+    if (responseCode === 200) {
+      Logger.log(`BACKEND (${FUNCION_NOMBRE}): Detalles de la suscripción ${subscriptionId} obtenidos exitosamente.`);
+      return JSON.parse(responseBody);
+    } else {
+      Logger.log(`ERROR (${FUNCION_NOMBRE}): Error al consultar suscripción ${subscriptionId}. Código: ${responseCode}. Respuesta: ${responseBody}`);
+      registrarLog("ERROR", "CONSULTA_MP_SUSCRIPCION", `Error al consultar detalles de la suscripción: HTTP ${responseCode}`, {
+        subscriptionId: subscriptionId, 
+        responseCode: responseCode, 
+        responseBody: responseBody
+      }, FUNCION_NOMBRE);
+      return null;
+    }
+  } catch (error) {
+    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+    registrarLog("ERROR", "CONSULTA_MP_SUSCRIPCION", `Excepción al consultar detalles de la suscripción: ${error.message}`, {
+      subscriptionId: subscriptionId, 
+      stack: error.stack
+    }, FUNCION_NOMBRE);
     return null;
   }
 }
 
 //==================================================================
-//     FIN SECCIÓN CONSOLIDADA DE INTEGRACIÓN CON MERCADO PAGO
+//          FIN SECCIÓN COMPLETA DE INTEGRACIÓN CON MERCADO PAGO
 //==================================================================
 
 /**
