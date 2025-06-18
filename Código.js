@@ -353,7 +353,7 @@ function procesarFormulario(formData) {
       } else {
         Logger.log('BACKEND (procesarFormulario): Fallo al iniciar suscripción en MP. Error: ' + resultadoMP.error);
         // Los datos del titular/deps ya se guardaron. Se notifica el error de MP.
-        enviarNotificacionBasica(formData, idRegistro); // Enviar notificación de registro, pero MP falló.
+        // enviarNotificacionBasica(formData, idRegistro); // Enviar notificación de registro, pero MP falló.
         resultadoFinal = {
           success: false, 
           registroId: idRegistro, // Devolvemos el idRegistro por si se quiere mostrar/usar
@@ -363,7 +363,7 @@ function procesarFormulario(formData) {
       }
     } else {
        registrarLog("INFO", "PROCESO_FORMULARIO", "Pago no recurrente NO seleccionado. No se crea suscripción en MP.", {idRegistro: idRegistro}, "procesarFormulario");
-       enviarNotificacionBasica(formData, idRegistro); // Solo se guardó el registro, no hubo intento de pago MP
+       // enviarNotificacionBasica(formData, idRegistro); // Solo se guardó el registro, no hubo intento de pago MP
        resultadoFinal = {
          success: true, // El registro en NUESTRO sistema fue exitoso
          registroId: idRegistro,
@@ -635,16 +635,16 @@ function procesarNotificacionDePago(paymentId) {
         registroActualizado = true;
 
         // 3. Disparar acciones según el estado del pago (COMENTADO TEMPORALMENTE)
-        if (estadoPago === 'approved') {
-          Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago aprobado. Disparando correo de bienvenida para ${externalReference}`);
-          // enviarCorreoBienvenida(externalReference); // COMENTADO TEMPORALMENTE - IMPLEMENTAR DESPUÉS
-        } else if (estadoPago === 'rejected') {
-          Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago rechazado. Disparando correo de problema para ${externalReference}`);
-          // enviarCorreoProblema(externalReference, 'Pago rechazado'); // COMENTADO TEMPORALMENTE - IMPLEMENTAR DESPUÉS
-        } else if (estadoPago === 'cancelled') {
-          Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago cancelado para ${externalReference}`);
-          registrarLog("INFO", "PAGO_CANCELADO", `Pago cancelado por el usuario`, {idRegistro: externalReference, paymentId: paymentId}, FUNCION_NOMBRE);
-        }
+      if (estadoPago === 'approved') {
+        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago aprobado. Disparando correo de bienvenida para ${externalReference}`);
+        enviarCorreoBienvenidaPostPago(externalReference); // ← CORREGIDO
+      } else if (estadoPago === 'rejected') {
+        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago rechazado. Disparando correo de problema para ${externalReference}`);
+        // enviarCorreoProblema(externalReference, 'Pago rechazado'); // COMENTADO TEMPORALMENTE - IMPLEMENTAR DESPUÉS
+      } else if (estadoPago === 'cancelled') {
+        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago cancelado para ${externalReference}`);
+        registrarLog("INFO", "PAGO_CANCELADO", `Pago cancelado por el usuario`, {idRegistro: externalReference, paymentId: paymentId}, FUNCION_NOMBRE);
+      }
         
         break; // Salir del bucle una vez encontrado y actualizado
       }
@@ -1361,4 +1361,76 @@ function initializeProject() {
     Logger.log(`Error al inicializar proyecto: ${error.toString()}`);
     return `Error al inicializar proyecto: ${error.toString()}`;
   }
+/**
+ * Envía correo de bienvenida cuando el pago es aprobado
+ * @param {string} idRegistro - ID del registro para buscar datos del titular
+ */
+function enviarCorreoBienvenidaPostPago(idRegistro) {
+  const FUNCION_NOMBRE = "enviarCorreoBienvenidaPostPago";
+  Logger.log(`${FUNCION_NOMBRE}: Iniciando envío para registro: ${idRegistro}`);
+  
+  try {
+    // 1. Buscar datos del titular en la hoja TITULAR
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const hojaTitular = ss.getSheetByName("TITULAR");
+    
+    if (!hojaTitular) {
+      Logger.log(`${FUNCION_NOMBRE}: Hoja TITULAR no encontrada`);
+      return false;
+    }
+    
+    const datos = hojaTitular.getDataRange().getValues();
+    let datosTitular = null;
+    
+    // Buscar por ID_REGISTRO (última columna)
+    for (let i = 1; i < datos.length; i++) {
+      const idEnHoja = datos[i][datos[i].length - 1]; // Última columna
+      if (idEnHoja === idRegistro) {
+        datosTitular = datos[i];
+        break;
+      }
+    }
+    
+    if (!datosTitular) {
+      Logger.log(`${FUNCION_NOMBRE}: No se encontraron datos para registro: ${idRegistro}`);
+      return false;
+    }
+    
+    // 2. Extraer email del titular
+    const email = datosTitular[19]; // Columna T (EMAIL)
+    const nombreCompleto = `${datosTitular[7]} ${datosTitular[5]}`; // NOMBRE + APELLIDO
+    
+    // 3. Cargar plantilla HTML del cliente
+    const plantillaHTML = HtmlService.createTemplateFromFile('PlantillaOncoplus').evaluate().getContent();
+    
+    // 4. Enviar correo usando la plantilla exacta del cliente
+    const asunto = "¡Bienvenido/a al Programa ONCOPLUS! - Tu cobertura está activada";
+    
+    MailApp.sendEmail({
+      to: email,
+      subject: asunto,
+      htmlBody: plantillaHTML
+    });
+    
+    // 5. Registrar envío exitoso
+    Logger.log(`${FUNCION_NOMBRE}: Correo enviado exitosamente a: ${email}`);
+    registrarLog("INFO", "CORREO_BIENVENIDA", `Correo de bienvenida enviado post-pago`, {
+      idRegistro: idRegistro,
+      email: email,
+      nombreCompleto: nombreCompleto
+    }, FUNCION_NOMBRE);
+    
+    return true;
+    
+  } catch (error) {
+    Logger.log(`${FUNCION_NOMBRE}: ERROR - ${error.message}`);
+    registrarLog("ERROR", "CORREO_BIENVENIDA", `Error al enviar correo de bienvenida: ${error.message}`, {
+      idRegistro: idRegistro,
+      stack: error.stack
+    }, FUNCION_NOMBRE);
+    return false;
+  }
+}
+
+
 }
