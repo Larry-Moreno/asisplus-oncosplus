@@ -532,47 +532,50 @@ function crearSuscripcionEnMercadoPagoYRegistrar(formData, idRegistro, montoTota
  * @param {object} e El objeto del evento que contiene los datos del POST.
  */
 function doPost(e) {
-  const FUNCION_NOMBRE = "doPost";
-  Logger.log(`BACKEND (${FUNCION_NOMBRE}): Webhook recibido de Mercado Pago.`);
-  
-  try {
-    if (!e || !e.postData || !e.postData.contents) {
-      Logger.log(`WARNING (${FUNCION_NOMBRE}): Webhook recibido sin datos válidos.`);
-      registrarLog("WARNING", "WEBHOOK_MP", "Webhook recibido sin datos válidos.", {postData: "null"}, FUNCION_NOMBRE);
-      return ContentService.createTextOutput(JSON.stringify({ "status": "no data" })).setMimeType(ContentService.MimeType.JSON);
-    }
+ const FUNCION_NOMBRE = "doPost";
+ Logger.log(`BACKEND (${FUNCION_NOMBRE}): Webhook recibido de Mercado Pago.`);
+ 
+ try {
+   if (!e || !e.postData || !e.postData.contents) {
+     Logger.log(`WARNING (${FUNCION_NOMBRE}): Webhook recibido sin datos válidos.`);
+     registrarLog("WARNING", "WEBHOOK_MP", "Webhook recibido sin datos válidos.", {postData: "null"}, FUNCION_NOMBRE);
+     return HtmlService.createHtmlOutput('<html><body>NO_DATA</body></html>').setTitle('Webhook Response');
+   }
 
-    const notificacion = JSON.parse(e.postData.contents);
-    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Notificación parseada: ${JSON.stringify(notificacion)}`);
-    registrarLog("INFO", "WEBHOOK_MP", "Notificación de Mercado Pago recibida.", {notificacion: notificacion}, FUNCION_NOMBRE);
+   const notificacion = JSON.parse(e.postData.contents);
+   Logger.log(`BACKEND (${FUNCION_NOMBRE}): Notificación parseada: ${JSON.stringify(notificacion)}`);
+   registrarLog("INFO", "WEBHOOK_MP", "Notificación de Mercado Pago recibida.", {notificacion: notificacion}, FUNCION_NOMBRE);
 
-    // Procesar según el tipo de notificación
-    if (notificacion.type === 'payment') {
-      // Notificación de pago individual
-      const paymentId = notificacion.data.id;
-      if (paymentId) {
-        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de pago ID: ${paymentId}`);
-        procesarNotificacionDePago(paymentId);
-      }
-    } else if (notificacion.type === 'subscription_preapproval') {
-      // Notificación de suscripción
-      const subscriptionId = notificacion.data.id;
-      if (subscriptionId) {
-        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de suscripción ID: ${subscriptionId}`);
-        procesarNotificacionDeSuscripcion(subscriptionId);
-      }
-    } else {
-      Logger.log(`INFO (${FUNCION_NOMBRE}): Tipo de notificación no procesado: ${notificacion.type}`);
-      registrarLog("INFO", "WEBHOOK_MP", `Tipo de notificación no procesado: ${notificacion.type}`, {notificacion: notificacion}, FUNCION_NOMBRE);
-    }
+   // Procesar según el tipo de notificación
+   if (notificacion.type === 'payment') {
+     // Notificación de pago individual
+     const paymentId = notificacion.data.id;
+     if (paymentId) {
+       Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de pago ID: ${paymentId}`);
+       procesarNotificacionDePago(paymentId);
+     }
+   } else if (notificacion.type === 'subscription_preapproval') {
+     // Notificación de suscripción
+     const subscriptionId = notificacion.data.id;
+     if (subscriptionId) {
+       Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de suscripción ID: ${subscriptionId}`);
+       procesarNotificacionDeSuscripcion(subscriptionId);
+     }
+   } else {
+     Logger.log(`INFO (${FUNCION_NOMBRE}): Tipo de notificación no procesado: ${notificacion.type}`);
+     registrarLog("INFO", "WEBHOOK_MP", `Tipo de notificación no procesado: ${notificacion.type}`, {notificacion: notificacion}, FUNCION_NOMBRE);
+   }
 
-    return ContentService.createTextOutput(JSON.stringify({ "status": "ok" })).setMimeType(ContentService.MimeType.JSON);
-    
-  } catch (error) {
-    Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
-    registrarLog("ERROR", "WEBHOOK_MP", `Error crítico en webhook: ${error.message}`, {postData: e ? e.postData.contents : 'N/A', stack: error.stack}, FUNCION_NOMBRE);
-    return ContentService.createTextOutput(JSON.stringify({ "status": "error", "message": error.message })).setMimeType(ContentService.MimeType.JSON);
-  }
+   // ✅ CAMBIO CRÍTICO: HtmlService en lugar de ContentService para evitar 302
+   Logger.log(`BACKEND (${FUNCION_NOMBRE}): Webhook procesado exitosamente, enviando respuesta 200 OK.`);
+   registrarLog("INFO", "WEBHOOK_MP", "Webhook procesado exitosamente.", {status: "ok"}, FUNCION_NOMBRE);
+   return HtmlService.createHtmlOutput('<html><body>OK</body></html>').setTitle('Webhook Response');
+   
+ } catch (error) {
+   Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
+   registrarLog("ERROR", "WEBHOOK_MP", `Error crítico en webhook: ${error.message}`, {postData: e ? e.postData.contents : 'N/A', stack: error.stack}, FUNCION_NOMBRE);
+   return HtmlService.createHtmlOutput('<html><body>ERROR</body></html>').setTitle('Webhook Error');
+ }
 }
 
 /**
