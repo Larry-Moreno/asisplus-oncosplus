@@ -1364,11 +1364,14 @@ function initializeProject() {
     Logger.log(`Error al inicializar proyecto: ${error.toString()}`);
     return `Error al inicializar proyecto: ${error.toString()}`;
   }
+}
+
 /**
  * Envía correo de bienvenida cuando el pago es aprobado
  * @param {string} idRegistro - ID del registro para buscar datos del titular
  */
 function enviarCorreoBienvenidaPostPago(idRegistro) {
+  // idRegistro = "REG-mcmbaf2d-VE5"; // ← ESTA LÍNEA ES NUEVA
   const FUNCION_NOMBRE = "enviarCorreoBienvenidaPostPago";
   Logger.log(`${FUNCION_NOMBRE}: Iniciando envío para registro: ${idRegistro}`);
   
@@ -1404,9 +1407,19 @@ function enviarCorreoBienvenidaPostPago(idRegistro) {
     const nombreCompleto = `${datosTitular[7]} ${datosTitular[5]}`; // NOMBRE + APELLIDO
     
     // 3. NUEVAS LÍNEAS: Obtener y calcular fechas dinámicas
-    const fechaVigencia = datosTitular[17]; // Columna R: INICIO/FIN VIGENCIA
-    const fechaCarencia = new Date(fechaVigencia);
-    fechaCarencia.setDate(fechaCarencia.getDate() + 90); // +90 días para carencia
+
+    //const fechaVigencia = datosTitular[17]; --> Columna R: INICIO/FIN VIGENCIA - se comentó y se reemplaza
+    //const fechaCarencia = new Date(fechaVigencia); -->  - se comentó y se reemplaza
+    //fechaCarencia.setDate(fechaCarencia.getDate() + 90); --> +90 días para carencia - se comentó y se reemplaza
+
+    // 3. Calcular fechas según reglas de Anahí
+    const fechaHoy = new Date();
+
+    // Vigencia: Primer día del mes siguiente
+    const fechaVigencia = new Date(fechaHoy.getFullYear(), fechaHoy.getMonth() + 1, 1);
+
+    // Carencia: Vigencia + 3 meses (primer día del 4to mes)
+    const fechaCarencia = new Date(fechaVigencia.getFullYear(), fechaVigencia.getMonth() + 3, 1);
     
     // Formatear fechas para mostrar (dd/mm/yyyy)
     const fechaVigenciaStr = fechaVigencia.toLocaleDateString('es-PE');
@@ -1418,8 +1431,10 @@ function enviarCorreoBienvenidaPostPago(idRegistro) {
     let plantillaHTML = HtmlService.createTemplateFromFile('PlantillaOncoplus').evaluate().getContent();
     
     // Reemplazar fechas hardcodeadas por fechas reales
-    plantillaHTML = plantillaHTML.replace('01/04/2025', fechaVigenciaStr);
-    plantillaHTML = plantillaHTML.replace('01/07/2025', fechaCarenciaStr);
+    plantillaHTML = plantillaHTML.replace('[PRIMER_NOMBRE]', datosTitular[7]);
+    plantillaHTML = plantillaHTML.replace('[APELLIDO_PATERNO]', datosTitular[5]);
+    plantillaHTML = plantillaHTML.replace('[FECHA_VIGENCIA]', fechaVigenciaStr);
+    plantillaHTML = plantillaHTML.replace('[FECHA_CARENCIA]', fechaCarenciaStr);
     
     // 5. Enviar correo usando la plantilla personalizada
     const asunto = "¡Bienvenido/a al Programa ONCOPLUS! - Tu cobertura está activada";
@@ -1452,5 +1467,6 @@ function enviarCorreoBienvenidaPostPago(idRegistro) {
   }
 }
 
-
-}
+// function probarCorreo() {
+//  enviarCorreoBienvenidaPostPago("REG-mcmbaf2d-VE5");
+//}
