@@ -1,4 +1,9 @@
 /**
+ * Author: Larry Moreno | CEO NODIKA Systems
+ * Date: 2025-01-17
+ */
+
+/**
  * Obtiene el HTML para un paso específico del wizard
  * @param {number} stepNumber - Número del paso a cargar
  * @return {string} HTML del paso solicitado
@@ -544,7 +549,26 @@ function doPost(e) {
 
    const notificacion = JSON.parse(e.postData.contents);
    Logger.log(`BACKEND (${FUNCION_NOMBRE}): Notificación parseada: ${JSON.stringify(notificacion)}`);
-   registrarLog("INFO", "WEBHOOK_MP", "Notificación de Mercado Pago recibida.", {notificacion: notificacion}, FUNCION_NOMBRE);
+   
+   // 🔍 DIAGNÓSTICO AVANZADO AGREGADO
+   console.log("=== WEBHOOK DIAGNÓSTICO COMPLETO ===");
+   console.log("Tipo de webhook:", notificacion.type);
+   console.log("Live mode:", notificacion.live_mode);
+   console.log("Action:", notificacion.action);
+   console.log("Payment/Subscription ID:", notificacion.data?.id);
+   console.log("User ID:", notificacion.user_id);
+   console.log("Fecha creación:", notificacion.date_created);
+   console.log("=== FIN DIAGNÓSTICO ===");
+   
+   registrarLog("INFO", "WEBHOOK_MP", "Notificación de Mercado Pago recibida.", {
+     notificacion: notificacion,
+     diagnostico: {
+       tipo: notificacion.type,
+       liveMode: notificacion.live_mode,
+       action: notificacion.action,
+       dataId: notificacion.data?.id
+     }
+   }, FUNCION_NOMBRE);
 
    // Procesar según el tipo de notificación
    if (notificacion.type === 'payment') {
@@ -554,6 +578,14 @@ function doPost(e) {
        Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de pago ID: ${paymentId}`);
        procesarNotificacionDePago(paymentId);
      }
+   } else if (notificacion.type === 'subscription_authorized_payment') {
+     // ✅ SOLUCIÓN: Notificación de pago autorizado de suscripción
+     const paymentId = notificacion.data.id;
+     if (paymentId) {
+       Logger.log(`BACKEND (${FUNCION_NOMBRE}): Procesando notificación de pago autorizado de suscripción ID: ${paymentId}`);
+       console.log("WEBHOOK CRÍTICO: Pago autorizado de suscripción recibido:", paymentId);
+       procesarNotificacionDePago(paymentId); // Usar la misma lógica que para pagos normales
+     }
    } else if (notificacion.type === 'subscription_preapproval') {
      // Notificación de suscripción
      const subscriptionId = notificacion.data.id;
@@ -562,8 +594,9 @@ function doPost(e) {
        procesarNotificacionDeSuscripcion(subscriptionId);
      }
    } else {
-     Logger.log(`INFO (${FUNCION_NOMBRE}): Tipo de notificación no procesado: ${notificacion.type}`);
-     registrarLog("INFO", "WEBHOOK_MP", `Tipo de notificación no procesado: ${notificacion.type}`, {notificacion: notificacion}, FUNCION_NOMBRE);
+     Logger.log(`WARNING (${FUNCION_NOMBRE}): Tipo de notificación no procesado: ${notificacion.type}`);
+     console.log("WEBHOOK NO PROCESADO:", notificacion.type, "Data:", notificacion.data);
+     registrarLog("WARNING", "WEBHOOK_MP", `Tipo de notificación no procesado: ${notificacion.type}`, {notificacion: notificacion}, FUNCION_NOMBRE);
    }
 
    // ✅ CAMBIO CRÍTICO: HtmlService en lugar de ContentService para evitar 302
@@ -640,6 +673,9 @@ function procesarNotificacionDePago(paymentId) {
         // 3. Disparar acciones según el estado del pago (COMENTADO TEMPORALMENTE)
       if (estadoPago === 'approved') {
         Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago aprobado. Disparando correo de bienvenida para ${externalReference}`);
+        // LOGS DE DEBUGGING AGREGADOS
+        console.log("Estado recibido:", estadoPago);
+        console.log("ID Registro a enviar correo:", externalReference);
         enviarCorreoBienvenidaPostPago(externalReference); // ← CORREGIDO
       } else if (estadoPago === 'rejected') {
         Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago rechazado. Disparando correo de problema para ${externalReference}`);
@@ -1373,6 +1409,8 @@ function initializeProject() {
 function enviarCorreoBienvenidaPostPago(idRegistro) {
   // idRegistro = "REG-mcmbaf2d-VE5"; // ← ESTA LÍNEA ES NUEVA
   const FUNCION_NOMBRE = "enviarCorreoBienvenidaPostPago";
+  // LOG DE DEBUGGING AGREGADO
+  console.log("Función enviarCorreoBienvenidaPostPago llamada con ID:", idRegistro);
   Logger.log(`${FUNCION_NOMBRE}: Iniciando envío para registro: ${idRegistro}`);
   
   try {
