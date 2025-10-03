@@ -1,4 +1,9 @@
 /**
+ * Author: Larry Moreno | CEO NODIKA Systems
+ * Date: 2025-08-11
+ */
+
+/**
  * Script de Configuración y Gestión ASISPLUS-ONCOPLUS (Consolidado)
  * ---------------------------------------------------
  * Este script crea y gestiona la estructura completa del sistema,
@@ -9,6 +14,37 @@
  */
 
 const NOMBRE_PROPIEDAD_CONTRASENA = 'editorPropietarioPassword';
+
+/**
+ * Configura la contraseña para edición del sistema
+ */
+function configurarContrasenaEdicion() {
+  const ui = SpreadsheetApp.getUi();
+  
+  const result = ui.prompt(
+    'Configurar Contraseña de Edición',
+    'Ingrese una contraseña segura para desbloquear las hojas del sistema:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (result.getSelectedButton() === ui.Button.OK) {
+    const password = result.getResponseText().trim();
+    
+    if (password.length < 6) {
+      ui.alert('Error', 'La contraseña debe tener al menos 6 caracteres.', ui.ButtonSet.OK);
+      return;
+    }
+    
+    try {
+      PropertiesService.getScriptProperties().setProperty(NOMBRE_PROPIEDAD_CONTRASENA, password);
+      ui.alert('Éxito', 'Contraseña configurada correctamente.', ui.ButtonSet.OK);
+      Logger.log('Contraseña de edición configurada.');
+    } catch (error) {
+      ui.alert('Error', 'No se pudo guardar la contraseña. Intente nuevamente.', ui.ButtonSet.OK);
+      Logger.log(`Error al configurar contraseña: ${error.message}`);
+    }
+  }
+}
 
 /**
  * Se ejecuta cuando se abre la hoja de cálculo.
@@ -45,24 +81,51 @@ function onOpen() {
 function bloquearLibroEntero(invocadoManualmente = true) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojas = ss.getSheets();
-  const yo = Session.getEffectiveUser();
+  
+  // Obtener el propietario del documento como fallback
+  let usuarioEditor;
+  try {
+    usuarioEditor = Session.getEffectiveUser();
+    // Verificar si el usuario es válido
+    if (!usuarioEditor || !usuarioEditor.getEmail() || usuarioEditor.getEmail() === '') {
+      // Si no hay usuario efectivo, usar el propietario del documento
+      usuarioEditor = ss.getOwner();
+    }
+  } catch (e) {
+    // Si falla, usar el propietario del documento
+    usuarioEditor = ss.getOwner();
+  }
 
   hojas.forEach(hoja => {
     try {
+      // Verificar si la hoja ya tiene protección
+      const proteccionesExistentes = hoja.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+      
+      // Si ya tiene protección, no intentar crear otra
+      if (proteccionesExistentes.length > 0) {
+        Logger.log(`Hoja '${hoja.getName()}' ya tiene protección existente.`);
+        return;
+      }
+      
       const proteccion = hoja.protect().setDescription('Protección del sistema ASISPLUS');
-      // Asegura que solo el propietario pueda editar la hoja mientras está protegida.
-      // Esto es crucial para que los scripts puedan seguir funcionando.
-      proteccion.removeEditors(proteccion.getEditors());
-      proteccion.addEditor(yo);
+      
+      // Solo agregar editor si tenemos un usuario válido
+      if (usuarioEditor && usuarioEditor.getEmail && usuarioEditor.getEmail() !== '') {
+        proteccion.removeEditors(proteccion.getEditors());
+        proteccion.addEditor(usuarioEditor);
+        Logger.log(`Hoja '${hoja.getName()}' protegida correctamente.`);
+      } else {
+        Logger.log(`No se pudo obtener usuario válido para proteger la hoja '${hoja.getName()}'.`);
+      }
     } catch (e) {
-      Logger.log(`No se pudo proteger la hoja '${hoja.getName()}'. Es posible que ya tenga una protección incompatible. Error: ${e.message}`);
+      Logger.log(`No se pudo proteger la hoja '${hoja.getName()}'. Error: ${e.message}`);
     }
   });
 
   if (invocadoManualmente) {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Todas las hojas han sido bloqueadas.', 'Sistema Seguro', 5);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Proceso de bloqueo completado.', 'Sistema Seguro', 5);
   }
-  Logger.log('Sistema bloqueado. Todas las hojas protegidas.');
+  Logger.log('Proceso de bloqueo de sistema completado.');
 }
 
 /**
@@ -88,19 +151,25 @@ function desbloquearLibroEntero() {
     if (password === storedPassword) {
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const hojas = ss.getSheets();
+      let hojasDesbloqueadas = 0;
 
       hojas.forEach(hoja => {
         try {
-          const proteccion = hoja.getProtections(SpreadsheetApp.ProtectionType.SHEET)[0];
-          if (proteccion && proteccion.canEdit()) {
-            proteccion.remove();
-          }
+          const protecciones = hoja.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+          protecciones.forEach(proteccion => {
+            if (proteccion.canEdit()) {
+              proteccion.remove();
+              hojasDesbloqueadas++;
+              Logger.log(`Hoja '${hoja.getName()}' desbloqueada correctamente.`);
+            }
+          });
         } catch (e) {
           Logger.log(`No se pudo desproteger la hoja '${hoja.getName()}'. Error: ${e.message}`);
         }
       });
-      ui.alert('Éxito', 'Todas las hojas han sido desbloqueadas para edición.', ui.ButtonSet.OK);
-      Logger.log('Sistema desbloqueado. Todas las hojas desprotegidas.');
+      
+      ui.alert('Éxito', `${hojasDesbloqueadas} hojas han sido desbloqueadas para edición.`, ui.ButtonSet.OK);
+      Logger.log(`Sistema desbloqueado. ${hojasDesbloqueadas} hojas desprotegidas.`);
     } else {
       ui.alert('Error', 'Contraseña incorrecta.', ui.ButtonSet.OK);
     }
@@ -868,35 +937,7 @@ function guardarCredencialesMercadoPago(publicKey, accessToken) {
   }
 }
 
-/**
- * Configura la contraseña para edición de hojas
- */
-function configurarContrasenaEdicion() {
-  const ui = SpreadsheetApp.getUi();
-  const ownerEmail = SpreadsheetApp.getActiveSpreadsheet().getOwner().getEmail();
-  const currentUserEmail = Session.getEffectiveUser().getEmail();
 
-  if (currentUserEmail !== ownerEmail) {
-    ui.alert('Acceso Denegado', 'Solo el propietario puede configurar la contraseña.', ui.ButtonSet.OK);
-    return;
-  }
-
-  const result = ui.prompt(
-    'Configurar Contraseña',
-    'Por favor, ingrese la nueva contraseña para desbloquear el libro para edición:',
-    ui.ButtonSet.OK_CANCEL
-  );
-
-  if (result.getSelectedButton() === ui.Button.OK) {
-    const password = result.getResponseText().trim();
-    if (password) {
-      PropertiesService.getScriptProperties().setProperty(NOMBRE_PROPIEDAD_CONTRASENA, password);
-      ui.alert('Éxito', 'La contraseña ha sido actualizada.', ui.ButtonSet.OK);
-    } else {
-      ui.alert('Error', 'La contraseña no puede estar vacía.', ui.ButtonSet.OK);
-    }
-  }
-}
 
 /**
  * Constante que define el nombre de la hoja de TRAMA.

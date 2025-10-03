@@ -1,0 +1,4 @@
+RESPALDO_KIRO/
+*.md
+.git/
+node_modules/
