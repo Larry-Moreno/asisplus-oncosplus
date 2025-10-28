@@ -1,7 +1,7 @@
 /**
  * Author: Larry Moreno | CEO NODIKA Systems
  * Date: 2025-01-17
- * Updated: 2025-11-08 - Restored complete webhook functionality
+ * Updated: 2025-10-28 - Added ID_PAGO_MP update to TRAMA GRUPALES
  */
 
 /**
@@ -314,7 +314,7 @@ function procesarFormulario(formData) {
     }
     // *** NUEVA LÍNEA AGREGADA: GENERAR REGISTRO EN TRAMA GRUPALES ***
     Logger.log('BACKEND: Llamando a generarRegistroTrama...');
-    generarRegistroTrama(formData);
+    generarRegistroTrama(formData, idRegistro);
     Logger.log('BACKEND: generarRegistroTrama completado.');
 
 
@@ -671,6 +671,9 @@ function procesarNotificacionDePago(paymentId) {
 
         registroActualizado = true;
 
+        // NUEVO: Actualizar TRAMA GRUPALES con el ID_PAGO_MP
+        actualizarIDPagoEnTramaGrupales(externalReference, paymentId);
+
         // 3. Disparar acciones según el estado del pago (COMENTADO TEMPORALMENTE)
         if (estadoPago === 'approved') {
           Logger.log(`BACKEND (${FUNCION_NOMBRE}): Pago aprobado. Disparando correo de bienvenida para ${externalReference}`);
@@ -753,6 +756,56 @@ function procesarNotificacionDeSuscripcion(subscriptionId) {
     Logger.log(`ERROR CRÍTICO en ${FUNCION_NOMBRE}: ${error.message}. Stack: ${error.stack}`);
     registrarLog("ERROR", "WEBHOOK_MP_SUSCRIPCION", `Error al procesar notificación de suscripción: ${error.message}`, {
       subscriptionId: subscriptionId,
+      stack: error.stack
+    }, FUNCION_NOMBRE);
+  }
+}
+
+/**
+ * Actualiza el ID_PAGO_MP en todas las filas de TRAMA GRUPALES que correspondan al ID_REGISTRO
+ * @param {string} idRegistro El ID del registro (external_reference)
+ * @param {string} idPagoMP El ID del pago de Mercado Pago
+ */
+function actualizarIDPagoEnTramaGrupales(idRegistro, idPagoMP) {
+  const FUNCION_NOMBRE = "actualizarIDPagoEnTramaGrupales";
+  
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const hojaTrama = ss.getSheetByName("TRAMA GRUPALES");
+    
+    if (!hojaTrama) {
+      Logger.log(`WARNING (${FUNCION_NOMBRE}): Hoja TRAMA GRUPALES no encontrada.`);
+      return;
+    }
+    
+    const datos = hojaTrama.getDataRange().getValues();
+    let filasActualizadas = 0;
+    
+    // Buscar todas las filas con este ID_REGISTRO (columna 20, índice 19)
+    for (let i = 1; i < datos.length; i++) {
+      if (datos[i][19] === idRegistro) { // Columna 20 = ID_REGISTRO
+        // Actualizar ID_PAGO_MP (columna 19, índice 18)
+        hojaTrama.getRange(i + 1, 19).setValue(idPagoMP);
+        filasActualizadas++;
+      }
+    }
+    
+    if (filasActualizadas > 0) {
+      Logger.log(`BACKEND (${FUNCION_NOMBRE}): ${filasActualizadas} filas actualizadas en TRAMA GRUPALES con ID_PAGO_MP: ${idPagoMP}`);
+      registrarLog("INFO", "TRAMA_ACTUALIZADA", `ID_PAGO_MP actualizado en TRAMA GRUPALES`, {
+        idRegistro: idRegistro,
+        idPagoMP: idPagoMP,
+        filasActualizadas: filasActualizadas
+      }, FUNCION_NOMBRE);
+    } else {
+      Logger.log(`WARNING (${FUNCION_NOMBRE}): No se encontraron filas en TRAMA GRUPALES para ID_REGISTRO: ${idRegistro}`);
+    }
+    
+  } catch (error) {
+    Logger.log(`ERROR en ${FUNCION_NOMBRE}: ${error.message}`);
+    registrarLog("ERROR", "TRAMA_ACTUALIZADA", `Error al actualizar TRAMA GRUPALES: ${error.message}`, {
+      idRegistro: idRegistro,
+      idPagoMP: idPagoMP,
       stack: error.stack
     }, FUNCION_NOMBRE);
   }
@@ -1066,7 +1119,8 @@ function guardarDatosTitular(formData) {
     tarifas.asisplus,               // COSTO INDIVIDUAL ASISPLUS
     totalMensualOncosalud,          // TOTAL MENSUAL ONCOSALUD (titular + dependientes)
     totalMensualAsisplus,           // TOTAL MENSUAL ASISPLUS (A COBRAR) (titular + dependientes)
-    idRegistro                      // ID_REGISTRO (columna AI)
+    idRegistro,                     // ID_REGISTRO (columna 35)
+    formData.ipUsuario || 'No disponible' // IP_USUARIO (columna 36) - capturada en el frontend
   ];
 
   // Agregar fila a la hoja

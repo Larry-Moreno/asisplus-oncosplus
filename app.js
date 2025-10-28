@@ -1,6 +1,6 @@
 /**
  * Author: Larry Moreno | CEO NODIKA Systems
- * Date: 2025-08-11
+ * Date: 2025-10-28
  */
 
 /**
@@ -251,7 +251,7 @@ function configurarEntornoBase() {
       "DECLARACIÓN JURADA", "DECLARACIÓN DE PRIVACIDAD", "TIPO DE CLIENTE", 
       "EDAD", "COSTO INDIVIDUAL ONCOSALUD", "COSTO INDIVIDUAL ASISPLUS",
       "TOTAL MENSUAL ONCOSALUD", "TOTAL MENSUAL ASISPLUS (A COBRAR)",
-      "ID_REGISTRO"
+      "ID_REGISTRO", "IP_USUARIO"
     ],
     
     // Estructura original de COSTOS
@@ -945,22 +945,24 @@ function guardarCredencialesMercadoPago(publicKey, accessToken) {
 const TRAMA_SHEET_NAME = 'TRAMA GRUPALES';
 
 /**
- * Constante que define los 17 encabezados para la hoja de TRAMA GRUPALES.
+ * Constante que define los 20 encabezados para la hoja de TRAMA GRUPALES.
  * Esta es la estructura final acordada.
  */
 const TRAMA_HEADERS = [
   'PAIS', 'TIPO DE TRAMA', 'GF SAP', 'CERTFICADO', 'APELLIDO PATERNO', 'APELLIDO MATERNO',
   'NOMBRE 1', 'NOMBRE 2', 'SEXO', 'FECHA DE NACIMIENTO DD/MM/AAAA', 'PARENTESCO',
   'TIPO DE DOCUMENTO', 'NUMERO DE DOCUMENTO', 'DIRECCION DE EMPRESA',
-  'CORREO DE CONTACTO DE LA EMPRESA', 'PROGRAMA', 'INICIO/FIN VIGENCIA'
+  'CORREO DE CONTACTO DE LA EMPRESA', 'PROGRAMA', 'INICIO/FIN VIGENCIA',
+  'IP_USUARIO', 'ID_PAGO_MP', 'ID_REGISTRO'
 ];
 
 /**
  * Orquesta la creación del registro en la hoja de TRAMA GRUPALES.
  * Esta es la función principal que se llamará después de un registro exitoso.
  * @param {object} datosFormulario El objeto JSON con los datos del titular y dependientes.
+ * @param {string} idRegistro El ID único del registro del titular.
  */
-function generarRegistroTrama(datosFormulario) {
+function generarRegistroTrama(datosFormulario, idRegistro) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     let targetSheet = ss.getSheetByName(TRAMA_SHEET_NAME);
@@ -973,7 +975,7 @@ function generarRegistroTrama(datosFormulario) {
       console.log(`Hoja '${TRAMA_SHEET_NAME}' creada y configurada.`);
     }
 
-    const newRows = _transformarDatosARows(datosFormulario);
+    const newRows = _transformarDatosARows(datosFormulario, idRegistro);
 
     // Escribir todas las filas en una sola operación para máxima eficiencia.
     if (newRows.length > 0) {
@@ -992,15 +994,20 @@ function generarRegistroTrama(datosFormulario) {
  * Función auxiliar privada para transformar el objeto de datos del formulario a un array de filas para la Trama.
  * VERSIÓN CORREGIDA - Compatible con estructura real del formData
  * @param {object} datosFormulario El objeto de la persona a procesar (estructura plana del formCache)
+ * @param {string} idRegistro El ID único del registro del titular
  * @returns {Array<Array<any>>} Un array de arrays, donde cada array interno representa una fila.
  * @private
  */
-function _transformarDatosARows(datosFormulario) {
+function _transformarDatosARows(datosFormulario, idRegistro) {
   const rows = [];
   
   // Valores que son comunes a todas las filas de este registro.
   const certificado = datosFormulario.numeroDocumento || '';
   const inicioVigencia = _getInicioVigencia();
+  
+  // Obtener IP y datos de Mercado Pago usando el ID_REGISTRO
+  const ipUsuario = _obtenerIPPorIDRegistro(idRegistro);
+  const idPagoMP = _obtenerIDPagoMPPorIDRegistro(idRegistro);
 
   // Mapeo de parentescos de texto a los códigos numéricos requeridos.
   const parentescoMap = {
@@ -1033,7 +1040,10 @@ function _transformarDatosARows(datosFormulario) {
     'CALLE ALFREDO SALAZAR 145 MIRAFLORES', // DIRECCION DE EMPRESA (Fijo)
     'GALVAREZ@ASEGUR.COM.PE', // CORREO DE CONTACTO DE LA EMPRESA (Fijo)
     'PLUS', // PROGRAMA (Fijo)
-    inicioVigencia // INICIO/FIN VIGENCIA (Calculado)
+    inicioVigencia, // INICIO/FIN VIGENCIA (Calculado)
+    ipUsuario, // IP_USUARIO (Lookup desde TITULAR)
+    idPagoMP, // ID_PAGO_MP (Lookup desde MERCADO_PAGO_TRANSACCIONES)
+    idRegistro // ID_REGISTRO (Para trazabilidad)
   ];
   rows.push(titularRow);
 
@@ -1070,13 +1080,85 @@ function _transformarDatosARows(datosFormulario) {
         'CALLE ALFREDO SALAZAR 145 MIRAFLORES',
         'GALVAREZ@ASEGUR.COM.PE',
         'PLUS',
-        inicioVigencia // INICIO/FIN VIGENCIA se replica del titular.
+        inicioVigencia, // INICIO/FIN VIGENCIA se replica del titular.
+        ipUsuario, // IP_USUARIO (mismo del titular)
+        idPagoMP, // ID_PAGO_MP (mismo del titular)
+        idRegistro // ID_REGISTRO (mismo del titular)
       ];
       rows.push(dependienteRow);
     }
   }
 
   return rows;
+}
+
+/**
+ * Obtiene la IP del usuario desde la hoja TITULAR usando el ID_REGISTRO
+ * @param {string} idRegistro El ID único del registro
+ * @returns {string} La IP del usuario o 'No disponible'
+ * @private
+ */
+function _obtenerIPPorIDRegistro(idRegistro) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const hojaTitular = ss.getSheetByName("TITULAR");
+    
+    if (!hojaTitular) {
+      Logger.log('ERROR: Hoja TITULAR no encontrada al buscar IP');
+      return 'No disponible';
+    }
+    
+    const datos = hojaTitular.getDataRange().getValues();
+    
+    // Buscar por ID_REGISTRO (columna 35, índice 34)
+    for (let i = 1; i < datos.length; i++) {
+      if (datos[i][34] === idRegistro) {
+        // Retornar IP_USUARIO (columna 36, índice 35)
+        return datos[i][35] || 'No disponible';
+      }
+    }
+    
+    Logger.log(`ADVERTENCIA: No se encontró registro con ID_REGISTRO: ${idRegistro}`);
+    return 'No disponible';
+  } catch (error) {
+    Logger.log(`ERROR al obtener IP: ${error.message}`);
+    return 'No disponible';
+  }
+}
+
+/**
+ * Obtiene el ID de pago de Mercado Pago desde MERCADO_PAGO_TRANSACCIONES usando el ID_REGISTRO
+ * @param {string} idRegistro El ID único del registro
+ * @returns {string} El ID de pago de MP o 'Pendiente'
+ * @private
+ */
+function _obtenerIDPagoMPPorIDRegistro(idRegistro) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const hojaMP = ss.getSheetByName("MERCADO_PAGO_TRANSACCIONES");
+    
+    if (!hojaMP) {
+      Logger.log('ADVERTENCIA: Hoja MERCADO_PAGO_TRANSACCIONES no encontrada');
+      return 'Pendiente';
+    }
+    
+    const datos = hojaMP.getDataRange().getValues();
+    
+    // Buscar por ID_REGISTRO (columna 2, índice 1)
+    for (let i = 1; i < datos.length; i++) {
+      if (datos[i][1] === idRegistro) {
+        // Retornar ID_PAGO_MP (columna 4, índice 3)
+        const idPagoMP = datos[i][3];
+        return idPagoMP || 'Pendiente';
+      }
+    }
+    
+    // Si no se encuentra transacción, es normal (aún no ha pagado)
+    return 'Pendiente';
+  } catch (error) {
+    Logger.log(`ERROR al obtener ID Pago MP: ${error.message}`);
+    return 'Pendiente';
+  }
 }
 
 /**
@@ -1108,16 +1190,10 @@ function _crearHojaTramaGrupales() {
   let sheet = ss.getSheetByName(sheetName);
 
   if (!sheet) {
-    const headers = [
-      'PAIS', 'TIPO DE TRAMA', 'GF SAP', 'CERTFICADO', 'APELLIDO PATERNO', 'APELLIDO MATERNO',
-      'NOMBRE 1', 'NOMBRE 2', 'SEXO', 'FECHA DE NACIMIENTO DD/MM/AAAA', 'PARENTESCO',
-      'TIPO DE DOCUMENTO', 'NUMERO DE DOCUMENTO', 'DIRECCION DE EMPRESA',
-      'CORREO DE CONTACTO DE LA EMPRESA', 'PROGRAMA', 'INICIO/FIN VIGENCIA'
-    ];
-    
+    // Usar TRAMA_HEADERS para mantener consistencia
     sheet = ss.insertSheet(sheetName, 0); 
-    sheet.appendRow(headers);
-    formatearEncabezados(sheet, headers.length);
+    sheet.appendRow(TRAMA_HEADERS);
+    formatearEncabezados(sheet, TRAMA_HEADERS.length);
     
     // Tarea 1: Asegurar que esta hoja también se proteja al crearse
     try {

@@ -77,6 +77,26 @@ const fieldDebounceTimers = {};
 const lastCostRequestIdForDependent = {}; // <--- AÑADE O VERIFICA ESTA LÍNEA
 let lastCostRequestIdForTitular = null; // <--- AÑADE ESTA LÍNEA
 
+// Variable global para almacenar la IP del usuario
+let userIPAddress = 'No disponible';
+
+/**
+ * Captura la IP del usuario usando el servicio ipify.org
+ * Esta función se ejecuta silenciosamente en segundo plano
+ */
+async function capturarIPUsuario() {
+  try {
+    console.log('Capturando IP del usuario...');
+    const response = await fetch('https://api.ipify.org?format=json');
+    const data = await response.json();
+    userIPAddress = data.ip;
+    console.log('IP capturada exitosamente:', userIPAddress);
+  } catch (error) {
+    console.warn('No se pudo capturar la IP del usuario:', error);
+    userIPAddress = 'No disponible';
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   if (!$('#notification-area')) {
     const area = document.createElement('div');
@@ -84,6 +104,9 @@ document.addEventListener('DOMContentLoaded', function() {
     area.setAttribute('aria-live', 'polite'); area.setAttribute('role', 'status');
     document.body.appendChild(area);
   }
+
+  // Capturar IP del usuario al cargar el formulario (silenciosamente)
+  capturarIPUsuario();
 
   // ----- INICIO DE PASO A (Limpieza Temporal de Caché) -----
   sessionStorage.removeItem('formCacheASISPLUS'); 
@@ -1490,6 +1513,9 @@ function submitFormData(formData) {
     if(loadingSpinner) loadingSpinner.style.display = 'flex';
     if(formErrorMessage) { formErrorMessage.textContent = ''; formErrorMessage.style.display = 'none';}
 
+    // Agregar la IP del usuario al formData antes de enviar
+    formData.ipUsuario = userIPAddress;
+    
     console.log("Enviando al backend:", JSON.parse(JSON.stringify(formData))); 
 
     google.script.run
